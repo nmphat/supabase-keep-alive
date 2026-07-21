@@ -95,6 +95,8 @@
         .history-table .error { color: var(--destructive); }
         .history-hidden { display: none; }
 
+        .hidden { display: none !important; }
+
         /* Interval badge */
         .interval-info { font-size: 13px; color: var(--muted); }
 
@@ -200,10 +202,12 @@
         async function checkAuth() {
             initToken();
             if (!TOKEN) { show('login-screen'); hide('dashboard'); return; }
-            const r = await api('/api/projects');
-            if (r === 401) { show('login-screen'); hide('dashboard'); return; }
-            hide('login-screen'); show('dashboard');
-            loadTemplates(); loadProjects();
+            try {
+                const r = await api('/api/projects');
+                if (r === 401 || !Array.isArray(r)) { show('login-screen'); hide('dashboard'); return; }
+                hide('login-screen'); show('dashboard');
+                loadTemplates(); loadProjects();
+            } catch { show('login-screen'); hide('dashboard'); }
         }
         function show(id) { document.getElementById(id).classList.remove('hidden'); }
         function hide(id) { document.getElementById(id).classList.add('hidden'); }

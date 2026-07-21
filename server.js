@@ -5,7 +5,10 @@ const https = require('https');
 
 const PORT = process.env.PORT || 3000;
 const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
+const PING_INTERVAL_HOURS = parseInt(process.env.PING_INTERVAL_HOURS || '12', 10);
 const PROJECTS_FILE = path.join(__dirname, 'data', 'projects.txt');
+const HISTORY_FILE = path.join(__dirname, 'data', 'history.json');
+const MAX_HISTORY = 20;
 const startTs = Date.now();
 
 // === Templates ===
@@ -82,6 +85,7 @@ function getTemplate(id) { return TEMPLATES.find(t => t.id === id); }
 
 // === Projects ===
 let projects = [];
+let history = {}; // { projectName: [{ ok, status, ms, time, error? }] }
 
 function loadProjects() {
   try {
@@ -95,7 +99,6 @@ function loadProjects() {
           const name = l.substring(0, firstPipe);
           const template = l.substring(firstPipe + 1, secondPipe);
           const fieldsStr = l.substring(secondPipe + 1);
-          // v1 compat: 3 parts, no = in third part
           if (!fieldsStr.includes('=')) {
             const url = template;
             const key = fieldsStr;
@@ -120,6 +123,14 @@ function loadProjects() {
   saveProjects();
 }
 
+function loadHistory() {
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    }
+  } catch { history = {}; }
+}
+
 function saveProjects() {
   const dir = path.dirname(PROJECTS_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -128,6 +139,12 @@ function saveProjects() {
     return `${p.name}|${p.template}|${fieldsStr}`;
   }).join('\n');
   fs.writeFileSync(PROJECTS_FILE, content);
+}
+
+function saveHistory() {
+  const dir = path.dirname(HISTORY_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
 }
 
 function maskSecret(val) {
@@ -139,7 +156,9 @@ function maskProject(p) {
   const tmpl = getTemplate(p.template);
   const maskedFields = { ...p.fields };
   if (tmpl) tmpl.fields.forEach(f => { if (f.secret && maskedFields[f.key]) maskedFields[f.key] = maskSecret(maskedFields[f.key]); });
-  return { name: p.name, template: p.template, fields: maskedFields, lastPing: p.lastPing || null, lastPingTime: p.lastPingTime || null };
+  const h = history[p.name] || [];
+  const lastPing = h.length > 0 ? h[h.length - 1] : null;
+  return { name: p.name, template: p.template, fields: maskedFields, lastPing, lastPingTime: lastPing?.time || null, pingHistory: h };
 }
 
 function validateName(name) {
@@ -148,20 +167,20 @@ function validateName(name) {
   return true;
 }
 
-// === Ping (with mutate) ===
+// === Ping ===
 async function pingProject(project) {
   const result = await doPing(project);
-  project.lastPing = result;
-  project.lastPingTime = new Date().toISOString();
+  const entry = { ok: result.ok, status: result.status, ms: result.ms, time: new Date().toISOString(), error: result.error };
+  if (!history[project.name]) history[project.name] = [];
+  history[project.name].push(entry);
+  if (history[project.name].length > MAX_HISTORY) history[project.name] = history[project.name].slice(-MAX_HISTORY);
   return result;
 }
 
-// === Ping (no mutate, for /api/test) ===
 async function pingProjectNoMutate(template, fields) {
   const tmpl = getTemplate(template);
   if (!tmpl) return { ok: false, error: 'unknown template' };
-  const fakeProject = { template, fields };
-  return doPing(fakeProject);
+  return doPing({ template, fields });
 }
 
 async function doPing(project) {
@@ -195,17 +214,15 @@ async function pingAll() {
   const results = await Promise.all(projects.map(p => pingProject(p)));
   lastPingTime = new Date().toISOString();
   console.log(`[${lastPingTime}] Ping all: ${results.filter(r => r.ok).length}/${results.length} alive`);
-  saveProjects();
+  saveHistory();
   return results;
 }
 
 // === Auth ===
 function checkAuth(req, url) {
   if (!AUTH_TOKEN) return true;
-  // Check Authorization header
   const auth = req.headers['authorization'] || '';
   if (auth === `Bearer ${AUTH_TOKEN}`) return true;
-  // Check ?token= query param
   if (url && url.searchParams.get('token') === AUTH_TOKEN) return true;
   return false;
 }
@@ -223,7 +240,6 @@ function json(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-// === Route match helper ===
 function matchRoute(pattern, pathname) {
   const regex = new RegExp('^' + pattern.replace(/:[^/]+/g, '([^/]+)') + '$');
   const m = pathname.match(regex);
@@ -232,14 +248,15 @@ function matchRoute(pattern, pathname) {
 
 // === Boot ===
 loadProjects();
+loadHistory();
 if (projects.length > 0) pingAll();
-setInterval(pingAll, 12 * 60 * 60 * 1000);
+setInterval(pingAll, PING_INTERVAL_HOURS * 60 * 60 * 1000);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
-  // Serve index.html (no auth — page handles token from ?token= param)
+  // Serve index.html
   if (pathname === '/' && req.method === 'GET') {
     try { const c = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(c); }
     catch { res.writeHead(500); res.end('Error'); }
@@ -249,7 +266,7 @@ const server = http.createServer(async (req, res) => {
   // Health (auth required)
   if (pathname === '/api/health' && req.method === 'GET') {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
-    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: projects.length, lastPing: lastPingTime });
+    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: projects.length, lastPing: lastPingTime, pingIntervalHours: PING_INTERVAL_HOURS });
   }
 
   // Templates (auth required)
@@ -281,7 +298,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 201, { success: true });
   }
 
-  // Test ping (no save)
+  // Test ping
   if (pathname === '/api/test' && req.method === 'POST') {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
@@ -312,7 +329,9 @@ const server = http.createServer(async (req, res) => {
     const idx = projects.findIndex(p => p.name === name);
     if (idx === -1) return json(res, 404, { error: 'Not found' });
     projects.splice(idx, 1);
+    delete history[name];
     saveProjects();
+    saveHistory();
     return json(res, 200, { success: true });
   }
 
@@ -323,7 +342,7 @@ const server = http.createServer(async (req, res) => {
     const project = projects.find(p => p.name === name);
     if (!project) return json(res, 404, { error: 'Not found' });
     const result = await pingProject(project);
-    saveProjects();
+    saveHistory();
     return json(res, 200, result);
   }
 
@@ -337,5 +356,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Keep-alive server running on port ${PORT}${AUTH_TOKEN ? ' (auth enabled)' : ' (no auth)'}`);
+  console.log(`Keep-alive server running on port ${PORT}${AUTH_TOKEN ? ' (auth enabled)' : ' (no auth)'} | ping interval: ${PING_INTERVAL_HOURS}h`);
 });

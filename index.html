@@ -79,7 +79,18 @@
         .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .hidden { display: none !important; }
+        /* History */
+        .history-toggle { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
+        .history-toggle:hover { color: var(--primary); }
+        .history-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+        .history-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+        .history-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); font-family: monospace; }
+        .history-table .ok { color: #22c55e; }
+        .history-table .error { color: var(--destructive); }
+        .history-hidden { display: none; }
+
+        /* Interval badge */
+        .interval-info { font-size: 13px; color: var(--muted); }
 
         @media (min-width: 640px) {
             .projects-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -109,6 +120,7 @@
                 <div class="meta">
                     <span id="uptime">-</span>
                     <span id="last-ping">-</span>
+                    <span class="interval-info" id="interval">-</span>
                 </div>
                 <button class="logout-btn" onclick="doLogout()">Logout</button>
             </div>
@@ -254,6 +266,7 @@
             if (h === 401) return;
             document.getElementById('uptime').textContent = `Up ${fmtTime(h.uptime)}`;
             document.getElementById('last-ping').textContent = h.lastPing ? new Date(h.lastPing).toLocaleTimeString() : 'never';
+            document.getElementById('interval').textContent = `every ${h.pingIntervalHours}h`;
 
             const ps = await api('/api/projects');
             if (ps === 401) return;
@@ -268,6 +281,22 @@
             const ping = p.lastPing;
             const status = ping ? (ping.ok ? `<span class="badge badge-ok">${ping.status} ${ping.ms}ms</span>` : `<span class="badge badge-error">${ping.error||ping.status}</span>`) : '<span class="badge badge-pending">-</span>';
             const fields = Object.entries(p.fields).map(([k,v]) => `${k}: ${v}`).join(' · ');
+            const histId = `hist-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+            // History table
+            const hist = (p.pingHistory || []).slice().reverse();
+            const historyHtml = hist.length > 0 ? `
+                <span class="history-toggle" onclick="toggleHistory('${histId}')">History (${hist.length}) ▾</span>
+                <div id="${histId}" class="history-hidden">
+                    <table class="history-table">
+                        <thead><tr><th>Time</th><th>Status</th><th>Response</th></tr></thead>
+                        <tbody>${hist.map(h => `<tr>
+                            <td>${new Date(h.time).toLocaleString()}</td>
+                            <td class="${h.ok ? 'ok' : 'error'}">${h.ok ? `✓ ${h.status}` : `✗ ${h.error||h.status}`}</td>
+                            <td>${h.ms}ms</td>
+                        </tr>`).join('')}</tbody>
+                    </table>
+                </div>` : '';
 
             if (editingName === p.name) {
                 const tmpl = templates.find(x => x.id === p.template);
@@ -288,12 +317,18 @@
             return `<div class="card">
                 <div class="card-header"><span class="card-title">${p.name}</span>${status}</div>
                 <div class="card-meta">${p.template} · ${fields}</div>
+                ${historyHtml}
                 <div class="card-actions">
                     <button class="btn-ghost btn-sm" onclick="pingOne('${esc(p.name)}')">Ping</button>
                     <button class="btn-ghost btn-sm" onclick="startEdit('${esc(p.name)}')">Edit</button>
                     <button class="btn-ghost btn-sm" style="color:var(--destructive)" onclick="deleteProject('${esc(p.name)}')">Remove</button>
                 </div>
             </div>`;
+        }
+
+        function toggleHistory(id) {
+            const el = document.getElementById(id);
+            el.classList.toggle('history-hidden');
         }
 
         function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }

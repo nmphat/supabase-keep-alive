@@ -5,258 +5,335 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Keep-Alive</title>
     <style>
-        * { box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #1e293b; }
-        h1 { margin: 0; font-size: 24px; color: #38bdf8; }
-        .meta { font-size: 14px; color: #94a3b8; display: flex; gap: 20px; }
-        .btn { background: #0ea5e9; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; transition: background 0.2s; }
-        .btn:hover { background: #38bdf8; }
-        .btn.secondary { background: #334155; }
-        .btn.secondary:hover { background: #475569; }
-        .btn.danger { background: #ef4444; }
-        .btn.danger:hover { background: #f87171; }
-        .btn.sm { padding: 4px 10px; font-size: 13px; }
-        .card { background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 15px; border: 1px solid #334155; }
-        .project-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .project-name { font-weight: 600; font-size: 18px; color: #f8fafc; }
-        .project-template { font-size: 13px; color: #94a3b8; }
-        .status { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; background: #1e293b; border: 1px solid #334155; }
-        .status.ok { color: #4ade80; border-color: #22c55e; background: #052e16; }
-        .status.error { color: #f87171; border-color: #ef4444; background: #450a0a; }
-        .project-fields { font-size: 13px; color: #94a3b8; margin-bottom: 12px; font-family: monospace; }
-        .actions { display: flex; gap: 8px; }
-        .form-card { background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 30px; border: 1px solid #334155; }
-        .form-row { display: flex; gap: 15px; margin-bottom: 12px; flex-wrap: wrap; }
-        .form-row:last-child { margin-bottom: 0; }
-        label { font-size: 13px; color: #94a3b8; display: block; margin-bottom: 4px; }
-        input, select { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 10px; border-radius: 6px; width: 100%; }
-        input:focus, select:focus { outline: none; border-color: #0ea5e9; }
-        select { cursor: pointer; }
-        .field-group { flex: 1; min-width: 150px; }
-        #login-screen { display: flex; justify-content: center; align-items: center; min-height: 60vh; }
-        .login-card { background: #1e293b; border-radius: 12px; padding: 40px; width: 100%; max-width: 400px; text-align: center; border: 1px solid #334155; }
-        .login-card h2 { margin: 0 0 20px; color: #38bdf8; }
-        .login-card input { margin-bottom: 15px; text-align: center; }
-        .error-msg { color: #f87171; font-size: 13px; margin-top: 8px; display: none; }
-        .logout-btn { background: none; border: 1px solid #475569; color: #94a3b8; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-        .logout-btn:hover { border-color: #94a3b8; color: #e2e8f0; }
+        :root {
+            --bg: #09090b; --surface: #18181b; --border: #27272a;
+            --primary: #fafafa; --primary-fg: #18181b;
+            --muted: #a1a1aa; --destructive: #ef4444;
+            --ring: #d4d4d8; --radius: 6px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--primary); font-size: 14px; line-height: 1.5; }
+        .container { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+
+        /* Header */
+        header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+        h1 { font-size: 18px; font-weight: 600; }
+        .meta { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+        .logout-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 4px 12px; border-radius: var(--radius); cursor: pointer; font-size: 13px; }
+        .logout-btn:hover { color: var(--primary); border-color: var(--muted); }
+
+        /* Buttons */
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--primary); color: var(--primary-fg); border: none; padding: 8px 16px; border-radius: var(--radius); cursor: pointer; font-size: 14px; font-weight: 500; transition: opacity 0.15s; min-height: 36px; }
+        .btn:hover { opacity: 0.9; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--primary); }
+        .btn-outline:hover { background: var(--surface); }
+        .btn-destructive { background: var(--destructive); color: white; }
+        .btn-destructive:hover { opacity: 0.9; }
+        .btn-ghost { background: transparent; border: none; color: var(--muted); padding: 4px 8px; }
+        .btn-ghost:hover { color: var(--primary); }
+        .btn-sm { min-height: 28px; padding: 4px 10px; font-size: 13px; }
+
+        /* Card */
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .card-title { font-size: 15px; font-weight: 600; }
+        .card-meta { font-size: 12px; color: var(--muted); font-family: monospace; }
+        .card-actions { display: flex; gap: 6px; margin-top: 12px; }
+
+        /* Status badge */
+        .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); }
+        .badge-ok { color: #22c55e; border-color: #22c55e; background: rgba(34,197,94,0.1); }
+        .badge-error { color: var(--destructive); border-color: var(--destructive); background: rgba(239,68,68,0.1); }
+        .badge-pending { color: var(--muted); }
+
+        /* Form */
+        .form-section { margin-bottom: 24px; }
+        .form-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+        .form-row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .field { flex: 1; min-width: 120px; }
+        .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .field input, .field select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--primary); padding: 8px 12px; border-radius: var(--radius); font-size: 14px; min-height: 36px; }
+        .field input:focus, .field select:focus { outline: none; border-color: var(--ring); box-shadow: 0 0 0 2px rgba(212,212,216,0.2); }
+        .field input::placeholder { color: var(--muted); opacity: 0.5; }
+        .error-text { color: var(--destructive); font-size: 12px; margin-top: 4px; }
+        .test-result { font-size: 13px; margin-top: 8px; padding: 8px; border-radius: var(--radius); }
+        .test-ok { color: #22c55e; background: rgba(34,197,94,0.1); }
+        .test-error { color: var(--destructive); background: rgba(239,68,68,0.1); }
+
+        /* Login */
+        #login-screen { display: flex; justify-content: center; align-items: center; min-height: 80vh; }
+        .login-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; width: 100%; max-width: 360px; }
+        .login-card h2 { font-size: 18px; margin-bottom: 16px; text-align: center; }
+        .login-card .field { margin-bottom: 12px; }
+        .login-card .btn { width: 100%; }
+
+        /* Edit mode */
+        .edit-fields { margin: 12px 0; }
+        .edit-fields .field { margin-bottom: 8px; }
+
+        /* Empty state */
+        .empty { text-align: center; padding: 32px; color: var(--muted); }
+
+        /* Spinner */
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
         .hidden { display: none !important; }
-        @media (max-width: 600px) {
-            .form-row { flex-direction: column; }
-            .meta { flex-direction: column; gap: 5px; }
+
+        @media (min-width: 640px) {
+            .projects-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            .projects-grid .card { margin-bottom: 0; }
         }
     </style>
 </head>
 <body>
-    <!-- Login Screen -->
+    <!-- Login -->
     <div id="login-screen">
         <div class="login-card">
-            <h2>🛡️ Keep-Alive</h2>
-            <input type="password" id="login-token" placeholder="Enter auth token" onkeydown="if(event.key==='Enter')doLogin()">
-            <button class="btn" onclick="doLogin()" style="width:100%">Login</button>
-            <div class="error-msg" id="login-error">Invalid token</div>
+            <h2>Keep-Alive</h2>
+            <div class="field">
+                <label for="login-token">Token</label>
+                <input type="password" id="login-token" placeholder="Enter auth token" onkeydown="if(event.key==='Enter')doLogin()">
+            </div>
+            <button class="btn" onclick="doLogin()">Login</button>
+            <div class="error-text hidden" id="login-error">Invalid token</div>
         </div>
     </div>
 
     <!-- Dashboard -->
     <div id="dashboard" class="container hidden">
         <header>
-            <h1>🛡️ Keep-Alive</h1>
-            <div style="display:flex;align-items:center;gap:15px;">
+            <h1>Keep-Alive</h1>
+            <div style="display:flex;align-items:center;gap:16px;">
                 <div class="meta">
-                    <span id="uptime">Uptime: ...</span>
-                    <span id="last-ping">Last run: never</span>
+                    <span id="uptime">-</span>
+                    <span id="last-ping">-</span>
                 </div>
-                <button class="logout-btn" id="logout-btn" onclick="doLogout()">Logout</button>
+                <button class="logout-btn" onclick="doLogout()">Logout</button>
             </div>
         </header>
 
-        <div style="margin-bottom: 25px;">
-            <button class="btn" onclick="pingAll()">Ping All</button>
+        <div style="margin-bottom:20px;">
+            <button class="btn btn-outline" onclick="pingAll()" id="ping-all-btn">Ping All</button>
         </div>
 
-        <div class="form-card">
-            <h3 style="margin:0 0 15px;font-size:16px;">Add Project</h3>
+        <!-- Add Project -->
+        <div class="form-section">
+            <h3>Add Project</h3>
             <div class="form-row">
-                <div class="field-group">
-                    <label>Template</label>
+                <div class="field">
+                    <label for="tmpl-select">Template</label>
                     <select id="tmpl-select" onchange="renderFields()"></select>
                 </div>
-            </div>
-            <div class="form-row">
-                <div class="field-group">
-                    <label>Name</label>
+                <div class="field">
+                    <label for="new-name">Name</label>
                     <input type="text" id="new-name" placeholder="my-project">
                 </div>
-                <div id="dynamic-fields"></div>
             </div>
-            <div class="form-row" style="justify-content:flex-end;">
-                <button class="btn" onclick="addProject()">Add</button>
+            <div class="form-row" id="dynamic-fields"></div>
+            <div class="form-row">
+                <button class="btn btn-outline btn-sm" onclick="testProject()" id="test-btn">Test</button>
+                <button class="btn btn-sm" onclick="addProject()" id="add-btn">Add</button>
+                <div id="test-result"></div>
             </div>
         </div>
 
-        <div id="projects-list"></div>
+        <!-- Projects -->
+        <div class="form-section">
+            <h3>Projects <span id="project-count" style="color:var(--muted);font-weight:400;"></span></h3>
+            <div id="projects-list"></div>
+        </div>
     </div>
 
     <script>
         const API = '';
         let TOKEN = localStorage.getItem('auth_token') || '';
         let templates = [];
+        let editingName = null;
 
         // === Auth ===
+        function initToken() {
+            const params = new URLSearchParams(window.location.search);
+            const t = params.get('token');
+            if (t) {
+                TOKEN = t;
+                localStorage.setItem('auth_token', t);
+                history.replaceState(null, '', window.location.pathname);
+            }
+        }
+
         async function checkAuth() {
-            if (!TOKEN) { showLogin(); return; }
-            try {
-                const res = await apiFetch('/api/projects');
-                if (res === 401) { showLogin(); return; }
-                showDashboard();
-                loadProjects();
-                loadTemplates();
-            } catch { showLogin(); }
+            initToken();
+            if (!TOKEN) { show('login-screen'); hide('dashboard'); return; }
+            const r = await api('/api/projects');
+            if (r === 401) { show('login-screen'); hide('dashboard'); return; }
+            hide('login-screen'); show('dashboard');
+            loadTemplates(); loadProjects();
         }
-
-        function showLogin() {
-            document.getElementById('login-screen').classList.remove('hidden');
-            document.getElementById('dashboard').classList.add('hidden');
-        }
-
-        function showDashboard() {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('dashboard').classList.remove('hidden');
-        }
+        function show(id) { document.getElementById(id).classList.remove('hidden'); }
+        function hide(id) { document.getElementById(id).classList.add('hidden'); }
 
         async function doLogin() {
-            const token = document.getElementById('login-token').value.trim();
-            if (!token) return;
-            TOKEN = token;
-            localStorage.setItem('auth_token', token);
-            try {
-                const res = await apiFetch('/api/projects');
-                if (res === 401) {
-                    document.getElementById('login-error').style.display = 'block';
-                    TOKEN = '';
-                    localStorage.removeItem('auth_token');
-                    return;
-                }
-                document.getElementById('login-error').style.display = 'none';
-                showDashboard();
-                loadProjects();
-                loadTemplates();
-            } catch { document.getElementById('login-error').style.display = 'block'; }
+            const t = document.getElementById('login-token').value.trim();
+            if (!t) return;
+            TOKEN = t; localStorage.setItem('auth_token', t);
+            const r = await api('/api/projects');
+            if (r === 401) { document.getElementById('login-error').classList.remove('hidden'); TOKEN = ''; localStorage.removeItem('auth_token'); return; }
+            document.getElementById('login-error').classList.add('hidden');
+            hide('login-screen'); show('dashboard');
+            loadTemplates(); loadProjects();
         }
-
-        function doLogout() {
-            TOKEN = '';
-            localStorage.removeItem('auth_token');
-            showLogin();
-        }
+        function doLogout() { TOKEN = ''; localStorage.removeItem('auth_token'); show('login-screen'); hide('dashboard'); }
 
         // === API ===
-        async function apiFetch(url, opts = {}) {
-            const headers = { 'Content-Type': 'application/json' };
-            if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
-            const res = await fetch(API + url, { ...opts, headers: { ...headers, ...opts.headers } });
-            if (res.status === 401) return 401;
-            return res.json();
+        async function api(url, opts = {}) {
+            const h = { 'Content-Type': 'application/json' };
+            if (TOKEN) h['Authorization'] = `Bearer ${TOKEN}`;
+            const r = await fetch(API + url, { ...opts, headers: { ...h, ...opts.headers } });
+            if (r.status === 401) return 401;
+            return r.json();
         }
 
         // === Templates ===
         async function loadTemplates() {
-            templates = await apiFetch('/api/templates');
-            const sel = document.getElementById('tmpl-select');
-            sel.innerHTML = templates.map(t => `<option value="${t.id}">${t.icon} ${t.name}</option>`).join('');
+            templates = await api('/api/templates');
+            const s = document.getElementById('tmpl-select');
+            s.innerHTML = templates.map(t => `<option value="${t.id}">${t.icon} ${t.name}</option>`).join('');
             renderFields();
         }
-
         function renderFields() {
-            const tmplId = document.getElementById('tmpl-select').value;
-            const tmpl = templates.find(t => t.id === tmplId);
-            if (!tmpl) return;
-            const container = document.getElementById('dynamic-fields');
-            container.innerHTML = tmpl.fields.map(f =>
-                `<div class="field-group">
-                    <label>${f.label}</label>
-                    <input type="${f.secret ? 'password' : 'text'}" id="field-${f.key}" placeholder="${f.placeholder || ''}">
-                </div>`
+            const t = templates.find(x => x.id === document.getElementById('tmpl-select').value);
+            if (!t) return;
+            document.getElementById('dynamic-fields').innerHTML = t.fields.map(f =>
+                `<div class="field"><label for="f-${f.key}">${f.label}</label><input type="${f.secret?'password':'text'}" id="f-${f.key}" placeholder="${f.placeholder||''}"></div>`
             ).join('');
+        }
+        function getFields() {
+            const t = templates.find(x => x.id === document.getElementById('tmpl-select').value);
+            if (!t) return {};
+            const f = {};
+            t.fields.forEach(x => { const el = document.getElementById(`f-${x.key}`); if (el) f[x.key] = el.value.trim(); });
+            return f;
+        }
+
+        // === Test ===
+        async function testProject() {
+            const btn = document.getElementById('test-btn');
+            const res = document.getElementById('test-result');
+            const template = document.getElementById('tmpl-select').value;
+            const fields = getFields();
+            btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; res.innerHTML = '';
+            const r = await api('/api/test', { method: 'POST', body: JSON.stringify({ template, fields }) });
+            btn.disabled = false; btn.textContent = 'Test';
+            if (r === 401) { res.innerHTML = '<span class="test-error">Unauthorized</span>'; return; }
+            res.innerHTML = r.ok
+                ? `<span class="test-ok">OK ${r.status} (${r.ms}ms)</span>`
+                : `<span class="test-error">Fail: ${r.error || r.status} (${r.ms || 0}ms)</span>`;
+        }
+
+        // === Add ===
+        async function addProject() {
+            const name = document.getElementById('new-name').value.trim();
+            const template = document.getElementById('tmpl-select').value;
+            const fields = getFields();
+            if (!name) return alert('Name required');
+            const t = templates.find(x => x.id === template);
+            for (const f of t.fields) { if (f.required && !fields[f.key]) return alert(`Missing: ${f.label}`); }
+            const r = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, template, fields }) });
+            if (r.error) return alert(r.error);
+            document.getElementById('new-name').value = '';
+            t.fields.forEach(f => { const el = document.getElementById(`f-${f.key}`); if (el) el.value = ''; });
+            document.getElementById('test-result').innerHTML = '';
+            loadProjects();
         }
 
         // === Projects ===
         async function loadProjects() {
-            const health = await apiFetch('/api/health');
-            if (health === 401) return;
-            document.getElementById('uptime').textContent = `Uptime: ${fmtTime(health.uptime)}`;
-            document.getElementById('last-ping').textContent = `Last: ${health.lastPing ? new Date(health.lastPing).toLocaleTimeString() : 'never'}`;
+            const h = await api('/api/health');
+            if (h === 401) return;
+            document.getElementById('uptime').textContent = `Up ${fmtTime(h.uptime)}`;
+            document.getElementById('last-ping').textContent = h.lastPing ? new Date(h.lastPing).toLocaleTimeString() : 'never';
 
-            const projects = await apiFetch('/api/projects');
-            if (projects === 401) return;
+            const ps = await api('/api/projects');
+            if (ps === 401) return;
+            document.getElementById('project-count').textContent = `(${ps.length})`;
             const list = document.getElementById('projects-list');
-            if (!projects.length) {
-                list.innerHTML = '<div class="card" style="text-align:center;color:#94a3b8;">No projects yet. Add one above.</div>';
-                return;
-            }
-            list.innerHTML = projects.map(p => {
-                const tmpl = templates.find(t => t.id === p.template);
-                const icon = tmpl ? tmpl.icon : '🌐';
-                const fieldStr = Object.entries(p.fields).map(([k, v]) => `${k}: ${v}`).join('  ');
-                const ping = p.lastPing;
-                const statusHtml = ping ? `<span class="status ${ping.ok ? 'ok' : 'error'}">${ping.ok ? `${ping.status} (${ping.ms}ms)` : `Error: ${ping.error || ping.status}`}</span>` : '<span class="status">-</span>';
-                return `
-                <div class="card">
-                    <div class="project-header">
-                        <span><span class="project-name">${icon} ${p.name}</span> <span class="project-template">(${p.template})</span></span>
-                        ${statusHtml}
-                    </div>
-                    <div class="project-fields">${fieldStr}</div>
-                    <div class="actions">
-                        <button class="btn secondary sm" onclick="pingOne('${p.name}')">Ping</button>
-                        <button class="btn danger sm" onclick="deleteProject('${p.name}')">Remove</button>
-                    </div>
-                </div>`;
-            }).join('');
+            if (!ps.length) { list.innerHTML = '<div class="empty">No projects yet</div>'; return; }
+            list.innerHTML = `<div class="projects-grid">${ps.map(p => renderCard(p)).join('')}</div>`;
         }
 
-        async function addProject() {
-            const name = document.getElementById('new-name').value.trim();
-            const template = document.getElementById('tmpl-select').value;
-            const tmpl = templates.find(t => t.id === template);
-            if (!name || !tmpl) return;
+        function renderCard(p) {
+            const t = templates.find(x => x.id === p.template);
+            const ping = p.lastPing;
+            const status = ping ? (ping.ok ? `<span class="badge badge-ok">${ping.status} ${ping.ms}ms</span>` : `<span class="badge badge-error">${ping.error||ping.status}</span>`) : '<span class="badge badge-pending">-</span>';
+            const fields = Object.entries(p.fields).map(([k,v]) => `${k}: ${v}`).join(' · ');
 
-            const fields = {};
-            for (const f of tmpl.fields) {
-                const el = document.getElementById(`field-${f.key}`);
-                if (el) fields[f.key] = el.value.trim();
-                if (f.required && !fields[f.key]) return alert(`Missing: ${f.label}`);
+            if (editingName === p.name) {
+                const tmpl = templates.find(x => x.id === p.template);
+                const editFields = tmpl.fields.map(f =>
+                    `<div class="field"><label>${f.label}</label><input type="${f.secret?'password':'text'}" id="edit-${f.key}" value="${p.fields[f.key]||''}"></div>`
+                ).join('');
+                return `<div class="card">
+                    <div class="card-header"><span class="card-title">${p.name}</span>${status}</div>
+                    <div class="card-meta">${p.template} · ${fields}</div>
+                    <div class="edit-fields">${editFields}</div>
+                    <div class="card-actions">
+                        <button class="btn btn-sm" onclick="saveEdit('${esc(p.name)}')">Save</button>
+                        <button class="btn btn-outline btn-sm" onclick="cancelEdit()">Cancel</button>
+                    </div>
+                </div>`;
             }
 
-            const res = await apiFetch('/api/projects', { method: 'POST', body: JSON.stringify({ name, template, fields }) });
-            if (res.error) return alert(res.error);
-            document.getElementById('new-name').value = '';
-            tmpl.fields.forEach(f => { const el = document.getElementById(`field-${f.key}`); if (el) el.value = ''; });
+            return `<div class="card">
+                <div class="card-header"><span class="card-title">${p.name}</span>${status}</div>
+                <div class="card-meta">${p.template} · ${fields}</div>
+                <div class="card-actions">
+                    <button class="btn-ghost btn-sm" onclick="pingOne('${esc(p.name)}')">Ping</button>
+                    <button class="btn-ghost btn-sm" onclick="startEdit('${esc(p.name)}')">Edit</button>
+                    <button class="btn-ghost btn-sm" style="color:var(--destructive)" onclick="deleteProject('${esc(p.name)}')">Remove</button>
+                </div>
+            </div>`;
+        }
+
+        function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+        function startEdit(name) { editingName = name; loadProjects(); }
+        function cancelEdit() { editingName = null; loadProjects(); }
+
+        async function saveEdit(name) {
+            const p = (await api('/api/projects')).find(x => x.name === name);
+            if (!p) return;
+            const tmpl = templates.find(x => x.id === p.template);
+            const fields = {};
+            tmpl.fields.forEach(f => { const el = document.getElementById(`edit-${f.key}`); if (el) fields[f.key] = el.value.trim(); });
+            await api(`/api/projects/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ fields }) });
+            editingName = null;
             loadProjects();
         }
 
         async function deleteProject(name) {
-            if (!confirm(`Delete ${name}?`)) return;
-            await apiFetch(`/api/projects/${name}`, { method: 'DELETE' });
+            if (!confirm(`Delete "${name}"?`)) return;
+            await api(`/api/projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
             loadProjects();
         }
 
         async function pingOne(name) {
-            await apiFetch(`/api/ping/${name}`);
+            await api(`/api/ping/${encodeURIComponent(name)}`);
             loadProjects();
         }
 
         async function pingAll() {
-            await apiFetch('/api/ping-all');
+            const btn = document.getElementById('ping-all-btn');
+            btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+            await api('/api/ping-all');
+            btn.disabled = false; btn.textContent = 'Ping All';
             loadProjects();
         }
 
         function fmtTime(s) {
-            const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-            return `${d > 0 ? d + 'd ' : ''}${h}h ${m}m`;
+            const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
+            return d > 0 ? `${d}d ${h}h` : `${h}h ${m}m`;
         }
 
         checkAuth();

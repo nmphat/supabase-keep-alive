@@ -78,9 +78,7 @@ const TEMPLATES = [
   }
 ];
 
-function getTemplate(id) {
-  return TEMPLATES.find(t => t.id === id);
-}
+function getTemplate(id) { return TEMPLATES.find(t => t.id === id); }
 
 // === Projects ===
 let projects = [];
@@ -91,25 +89,29 @@ function loadProjects() {
       const content = fs.readFileSync(PROJECTS_FILE, 'utf8');
       if (content.trim()) {
         projects = content.split('\n').filter(l => l.trim()).map(l => {
-          const parts = l.split('|');
-          // v1 format: name|url|key (3 parts, no template)
-          if (parts.length === 3 && !parts[2].includes('=')) {
-            const [name, url, key] = parts;
+          const firstPipe = l.indexOf('|');
+          const secondPipe = l.indexOf('|', firstPipe + 1);
+          if (firstPipe === -1 || secondPipe === -1) return null;
+          const name = l.substring(0, firstPipe);
+          const template = l.substring(firstPipe + 1, secondPipe);
+          const fieldsStr = l.substring(secondPipe + 1);
+          // v1 compat: 3 parts, no = in third part
+          if (!fieldsStr.includes('=')) {
+            const url = template;
+            const key = fieldsStr;
             if (url.includes('supabase.co')) {
               const ref = url.replace('https://', '').replace('.supabase.co', '');
               return { name, template: 'supabase', fields: { ref, anon_key: key } };
             }
             return { name, template: 'generic', fields: { url } };
           }
-          // v2 format: name|template|field1=val1;field2=val2
-          const [name, template, fieldsStr] = parts;
           const fields = {};
-          (fieldsStr || '').split(';').forEach(pair => {
-            const [k, ...v] = pair.split('=');
-            if (k) fields[k] = v.join('=');
+          fieldsStr.split(';').forEach(pair => {
+            const eq = pair.indexOf('=');
+            if (eq > 0) fields[pair.substring(0, eq)] = pair.substring(eq + 1);
           });
           return { name, template, fields };
-        });
+        }).filter(Boolean);
         return;
       }
     }
@@ -136,79 +138,59 @@ function maskSecret(val) {
 function maskProject(p) {
   const tmpl = getTemplate(p.template);
   const maskedFields = { ...p.fields };
-  if (tmpl) {
-    tmpl.fields.forEach(f => {
-      if (f.secret && maskedFields[f.key]) {
-        maskedFields[f.key] = maskSecret(maskedFields[f.key]);
-      }
-    });
-  }
+  if (tmpl) tmpl.fields.forEach(f => { if (f.secret && maskedFields[f.key]) maskedFields[f.key] = maskSecret(maskedFields[f.key]); });
   return { name: p.name, template: p.template, fields: maskedFields, lastPing: p.lastPing || null, lastPingTime: p.lastPingTime || null };
 }
 
 function validateName(name) {
-  return /^[a-z0-9-]{1,50}$/.test(name);
+  if (!name || name.trim().length === 0 || name.length > 255) return false;
+  if (/[\n\r\0|]/.test(name)) return false;
+  return true;
 }
 
-// === Ping ===
+// === Ping (with mutate) ===
 async function pingProject(project) {
+  const result = await doPing(project);
+  project.lastPing = result;
+  project.lastPingTime = new Date().toISOString();
+  return result;
+}
+
+// === Ping (no mutate, for /api/test) ===
+async function pingProjectNoMutate(template, fields) {
+  const tmpl = getTemplate(template);
+  if (!tmpl) return { ok: false, error: 'unknown template' };
+  const fakeProject = { template, fields };
+  return doPing(fakeProject);
+}
+
+async function doPing(project) {
   const tmpl = getTemplate(project.template);
   if (!tmpl) return { name: project.name, ok: false, error: 'unknown template' };
-
   const url = tmpl.buildUrl(project.fields);
   const headers = tmpl.buildHeaders(project.fields);
   const method = tmpl.method || 'GET';
   const body = tmpl.body || null;
-
   return new Promise((resolve) => {
     const parsed = new URL(url);
     const start = Date.now();
     const isHttps = parsed.protocol === 'https:';
     const lib = isHttps ? https : require('http');
-
-    const opts = {
-      hostname: parsed.hostname,
-      port: parsed.port || (isHttps ? 443 : 80),
-      path: parsed.pathname + parsed.search,
-      method,
-      headers,
-      timeout: 5000
-    };
-
+    const opts = { hostname: parsed.hostname, port: parsed.port || (isHttps ? 443 : 80), path: parsed.pathname + parsed.search, method, headers, timeout: 5000 };
     const req = lib.request(opts, (res) => {
       const ms = Date.now() - start;
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        const result = { name: project.name, ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, ms };
-        project.lastPing = result;
-        project.lastPingTime = new Date().toISOString();
-        resolve(result);
-      });
+      res.on('end', () => resolve({ name: project.name, ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, ms }));
     });
-
-    req.on('timeout', () => {
-      req.destroy();
-      const result = { name: project.name, ok: false, error: 'timeout', ms: 5000 };
-      project.lastPing = result;
-      project.lastPingTime = new Date().toISOString();
-      resolve(result);
-    });
-
-    req.on('error', (e) => {
-      const result = { name: project.name, ok: false, error: e.message, ms: Date.now() - start };
-      project.lastPing = result;
-      project.lastPingTime = new Date().toISOString();
-      resolve(result);
-    });
-
+    req.on('timeout', () => { req.destroy(); resolve({ name: project.name, ok: false, error: 'timeout', ms: 5000 }); });
+    req.on('error', (e) => resolve({ name: project.name, ok: false, error: e.message, ms: Date.now() - start }));
     if (body) req.write(body);
     req.end();
   });
 }
 
 let lastPingTime = null;
-
 async function pingAll() {
   const results = await Promise.all(projects.map(p => pingProject(p)));
   lastPingTime = new Date().toISOString();
@@ -218,26 +200,34 @@ async function pingAll() {
 }
 
 // === Auth ===
-function checkAuth(req) {
-  if (!AUTH_TOKEN) return true; // no auth configured
+function checkAuth(req, url) {
+  if (!AUTH_TOKEN) return true;
+  // Check Authorization header
   const auth = req.headers['authorization'] || '';
-  return auth === `Bearer ${AUTH_TOKEN}`;
+  if (auth === `Bearer ${AUTH_TOKEN}`) return true;
+  // Check ?token= query param
+  if (url && url.searchParams.get('token') === AUTH_TOKEN) return true;
+  return false;
 }
 
 function parseBody(req) {
   return new Promise((resolve) => {
     let body = '';
     req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try { resolve(JSON.parse(body)); }
-      catch { resolve(null); }
-    });
+    req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
   });
 }
 
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
+}
+
+// === Route match helper ===
+function matchRoute(pattern, pathname) {
+  const regex = new RegExp('^' + pattern.replace(/:[^/]+/g, '([^/]+)') + '$');
+  const m = pathname.match(regex);
+  return m ? m.slice(1) : null;
 }
 
 // === Boot ===
@@ -247,74 +237,79 @@ setInterval(pingAll, 12 * 60 * 60 * 1000);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
 
-  // Serve index.html
-  if (url.pathname === '/' && req.method === 'GET') {
-    try {
-      const content = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(content);
-    } catch { res.writeHead(500); res.end('Error'); }
+  // Serve index.html (no auth — page handles token from ?token= param)
+  if (pathname === '/' && req.method === 'GET') {
+    try { const c = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(c); }
+    catch { res.writeHead(500); res.end('Error'); }
     return;
   }
 
-  // Health (no auth)
-  if (url.pathname === '/api/health' && req.method === 'GET') {
+  // Health (auth required)
+  if (pathname === '/api/health' && req.method === 'GET') {
+    if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
     return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: projects.length, lastPing: lastPingTime });
   }
 
-  // Templates (no auth)
-  if (url.pathname === '/api/templates' && req.method === 'GET') {
+  // Templates (auth required)
+  if (pathname === '/api/templates' && req.method === 'GET') {
+    if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
     return json(res, 200, TEMPLATES.map(t => ({ id: t.id, name: t.name, icon: t.icon, fields: t.fields })));
   }
 
-  // Auth check for everything below
-  if (!checkAuth(req)) return json(res, 401, { error: 'Unauthorized' });
+  // Auth check
+  if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
 
   // List projects
-  if (url.pathname === '/api/projects' && req.method === 'GET') {
+  if (pathname === '/api/projects' && req.method === 'GET') {
     return json(res, 200, projects.map(maskProject));
   }
 
   // Add project
-  if (url.pathname === '/api/projects' && req.method === 'POST') {
+  if (pathname === '/api/projects' && req.method === 'POST') {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
-
     const { name, template, fields } = body;
-    if (!validateName(name)) return json(res, 400, { error: 'Invalid name (lowercase alphanumeric + hyphens, max 50)' });
+    if (!validateName(name)) return json(res, 400, { error: 'Invalid name' });
     if (!getTemplate(template)) return json(res, 400, { error: 'Unknown template' });
-    if (projects.some(p => p.name === name)) return json(res, 409, { error: 'Project name exists' });
-
-    // Validate required fields
+    if (projects.some(p => p.name === name)) return json(res, 409, { error: 'Name exists' });
     const tmpl = getTemplate(template);
-    for (const f of tmpl.fields) {
-      if (f.required && (!fields || !fields[f.key])) return json(res, 400, { error: `Missing field: ${f.label}` });
-    }
-
+    for (const f of tmpl.fields) { if (f.required && (!fields || !fields[f.key])) return json(res, 400, { error: `Missing: ${f.label}` }); }
     projects.push({ name, template, fields: fields || {} });
     saveProjects();
     return json(res, 201, { success: true });
   }
 
-  // Update project
-  const updateMatch = url.pathname.match(/^\/api\/projects\/([a-z0-9-]+)$/);
-  if (updateMatch && req.method === 'PUT') {
-    const idx = projects.findIndex(p => p.name === updateMatch[1]);
-    if (idx === -1) return json(res, 404, { error: 'Not found' });
-
+  // Test ping (no save)
+  if (pathname === '/api/test' && req.method === 'POST') {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
+    const { template, fields } = body;
+    if (!getTemplate(template)) return json(res, 400, { error: 'Unknown template' });
+    const tmpl = getTemplate(template);
+    for (const f of tmpl.fields) { if (f.required && (!fields || !fields[f.key])) return json(res, 400, { error: `Missing: ${f.label}` }); }
+    const result = await pingProjectNoMutate(template, fields);
+    return json(res, 200, result);
+  }
 
+  // Update project
+  let m = matchRoute('/api/projects/:name', pathname);
+  if (m && req.method === 'PUT') {
+    const name = decodeURIComponent(m[0]);
+    const idx = projects.findIndex(p => p.name === name);
+    if (idx === -1) return json(res, 404, { error: 'Not found' });
+    const body = await parseBody(req);
+    if (!body) return json(res, 400, { error: 'Invalid JSON' });
     if (body.fields) projects[idx].fields = { ...projects[idx].fields, ...body.fields };
     saveProjects();
     return json(res, 200, { success: true });
   }
 
   // Delete project
-  const deleteMatch = url.pathname.match(/^\/api\/projects\/([a-z0-9-]+)$/);
-  if (deleteMatch && req.method === 'DELETE') {
-    const idx = projects.findIndex(p => p.name === deleteMatch[1]);
+  if (m && req.method === 'DELETE') {
+    const name = decodeURIComponent(m[0]);
+    const idx = projects.findIndex(p => p.name === name);
     if (idx === -1) return json(res, 404, { error: 'Not found' });
     projects.splice(idx, 1);
     saveProjects();
@@ -322,9 +317,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Ping single
-  const pingMatch = url.pathname.match(/^\/api\/ping\/([a-z0-9-]+)$/);
-  if (pingMatch && req.method === 'GET') {
-    const project = projects.find(p => p.name === pingMatch[1]);
+  m = matchRoute('/api/ping/:name', pathname);
+  if (m && req.method === 'GET') {
+    const name = decodeURIComponent(m[0]);
+    const project = projects.find(p => p.name === name);
     if (!project) return json(res, 404, { error: 'Not found' });
     const result = await pingProject(project);
     saveProjects();
@@ -332,7 +328,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Ping all
-  if (url.pathname === '/api/ping-all' && req.method === 'GET') {
+  if (pathname === '/api/ping-all' && req.method === 'GET') {
     const results = await pingAll();
     return json(res, 200, results);
   }

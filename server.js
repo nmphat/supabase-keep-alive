@@ -324,6 +324,19 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, pingIntervalHours: db.config.pingIntervalHours, r2Enabled: R2_ENABLED });
   }
 
+  // R2 diagnostic
+  if (pathname === '/api/r2-test' && req.method === 'GET') {
+    if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
+    if (!r2Client) return json(res, 200, { r2Enabled: false, error: 'R2 not configured' });
+    try {
+      await r2Put('__test.txt', 'ping ' + Date.now());
+      const read = await r2Get('__test.txt');
+      return json(res, 200, { r2Enabled: true, write: true, read: read ? read.substring(0, 30) : null, bucket: R2_BUCKET, endpoint: R2_ENDPOINT });
+    } catch (e) {
+      return json(res, 200, { r2Enabled: true, write: false, error: e.message, bucket: R2_BUCKET, endpoint: R2_ENDPOINT });
+    }
+  }
+
   if (pathname === '/api/templates' && req.method === 'GET') {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
     return json(res, 200, TEMPLATES.map(t => ({ id: t.id, name: t.name, icon: t.icon, fields: t.fields })));

@@ -4,7 +4,7 @@ const path = require('path');
 const https = require('https');
 
 const PORT = process.env.PORT || 3000;
-const PROJECTS_FILE = path.join(__dirname, 'projects.txt');
+const PROJECTS_FILE = path.join(__dirname, 'data', 'projects.txt');
 const startTs = Date.now();
 
 let projects = [];
@@ -13,7 +13,7 @@ function loadProjects() {
   try {
     if (fs.existsSync(PROJECTS_FILE)) {
       const content = fs.readFileSync(PROJECTS_FILE, 'utf8');
-      if (content.trim()) { // If file exists and is not empty, use it
+      if (content.trim()) {
         projects = content.split('\n').filter(l => l.trim()).map(l => {
           const [name, url, key] = l.split('|');
           return { name, url, key };
@@ -22,18 +22,13 @@ function loadProjects() {
       }
     }
   } catch (e) {}
-
-  // Otherwise, try env var
-  const envProjects = process.env.PROJECTS || '';
-  projects = envProjects.split(';').filter(s => s.trim()).map(s => {
-    const [name, url, key] = s.split('|');
-    return { name, url, key };
-  }).filter(p => p.name && p.url && p.key);
-  
+  projects = [];
   saveProjects();
 }
 
 function saveProjects() {
+  const dir = path.dirname(PROJECTS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const content = projects.map(p => `${p.name}|${p.url}|${p.key}`).join('\n');
   fs.writeFileSync(PROJECTS_FILE, content);
 }
@@ -96,10 +91,12 @@ async function pingAll() {
   return results;
 }
 
-// Boot sequence
+// Boot
 loadProjects();
-pingAll(); // Initial ping on boot
-setInterval(pingAll, 12 * 60 * 60 * 1000); // Every 12 hours
+if (projects.length > 0) {
+  pingAll();
+}
+setInterval(pingAll, 12 * 60 * 60 * 1000);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -239,7 +236,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Ping single project
+  // Ping single
   const pingMatch = url.pathname.match(/^\/api\/ping\/([a-z0-9-]+)$/);
   if (pingMatch && req.method === 'GET') {
     const name = pingMatch[1];

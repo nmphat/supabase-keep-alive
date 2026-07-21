@@ -73,7 +73,7 @@ function enqueueWrite(key, data) {
       }
     } finally {
       writing = false;
-      if (writeQueue.length) { writing = true; enqueueWrite(writeQueue.shift().key, writeQueue.shift().data); }
+      if (writeQueue.length) { const item = writeQueue.shift(); enqueueWrite(item.key, item.data); }
     }
   })();
 }
@@ -282,11 +282,17 @@ function checkAuth(req, url) {
 function parseBody(req) {
   return new Promise((resolve) => {
     let body = '';
+    let done = false;
     req.on('data', chunk => {
+      if (done) return;
       body += chunk;
-      if (body.length > 1024 * 1024) { req.destroy(); resolve(null); }
+      if (body.length > 1024 * 1024) { done = true; req.destroy(); resolve(null); }
     });
-    req.on('end', () => { if (body.length <= 1024 * 1024) { try { resolve(JSON.parse(body)); } catch { resolve(null); } } });
+    req.on('end', () => {
+      if (done) return;
+      done = true;
+      try { resolve(JSON.parse(body)); } catch { resolve(null); }
+    });
   });
 }
 
@@ -381,9 +387,10 @@ const server = http.createServer(async (req, res) => {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
     if (body.fields) {
+      const merged = { ...db.projects[idx].fields, ...body.fields };
       const tmpl = getTemplate(db.projects[idx].template);
-      for (const f of tmpl.fields) { if (f.required && !body.fields[f.key]) return json(res, 400, { error: `Missing: ${f.label}` }); }
-      db.projects[idx].fields = { ...db.projects[idx].fields, ...body.fields };
+      for (const f of tmpl.fields) { if (f.required && !merged[f.key]) return json(res, 400, { error: `Missing: ${f.label}` }); }
+      db.projects[idx].fields = merged;
     }
     saveDb();
     return json(res, 200, { success: true });
@@ -406,7 +413,6 @@ const server = http.createServer(async (req, res) => {
     const project = db.projects.find(p => p.name === name);
     if (!project) return json(res, 404, { error: 'Not found' });
     const result = await pingProject(project);
-    saveDb();
     saveHistory();
     return json(res, 200, result);
   }

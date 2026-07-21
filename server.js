@@ -62,15 +62,16 @@ function enqueueWrite(key, data) {
   if (writing) return;
   writing = true;
   (async () => {
-    while (writeQueue.length) {
-      const item = writeQueue.shift();
-      const localPath = item.key === 'db.json' ? DB_FILE : HISTORY_FILE;
-      try { fs.mkdirSync(path.dirname(localPath), { recursive: true }); } catch {}
-      fs.writeFileSync(localPath, item.data);
-      try { await r2Put(item.key, item.data); }
-      catch (e) { console.error(`R2 write ${item.key} failed: ${e.message}`); }
-    }
-    writing = false;
+    try {
+      while (writeQueue.length) {
+        const item = writeQueue.shift();
+        const localPath = item.key === 'db.json' ? DB_FILE : HISTORY_FILE;
+        try { fs.mkdirSync(path.dirname(localPath), { recursive: true }); } catch {}
+        try { fs.writeFileSync(localPath, item.data); } catch (e) { console.error(`Local write ${item.key} failed: ${e.message}`); }
+        try { await r2Put(item.key, item.data); }
+        catch (e) { console.error(`R2 write ${item.key} failed: ${e.message}`); }
+      }
+    } finally { writing = false; }
   })();
 }
 
@@ -119,7 +120,12 @@ const TEMPLATES = [
   {
     id: 'generic', name: 'Generic HTTP', icon: '🌐',
     fields: [{ key: 'url', label: 'URL', placeholder: 'https://example.com/health', required: true }],
-    buildUrl: (f) => f.url, buildHeaders: () => ({}), method: 'GET'
+    buildUrl: (f) => {
+      const url = new URL(f.url);
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid protocol');
+      // ponytail: no DNS check, add if SSRF matters beyond personal use
+      return f.url;
+    }, buildHeaders: () => ({}), method: 'GET'
   }
 ];
 
@@ -154,7 +160,7 @@ function saveDb() { enqueueWrite('db.json', JSON.stringify(db, null, 2)); }
 function saveHistory() { enqueueWrite('history.json', JSON.stringify(history)); }
 
 // Boot sequence
-function boot() {
+async function boot() {
   // 1. Try local db.json
   try {
     if (fs.existsSync(DB_FILE)) {
@@ -180,16 +186,15 @@ function boot() {
     }
   } catch {}
 
-  // 3. Try R2
-  r2Get('db.json').then(data => {
-    if (data) {
-      try { db = JSON.parse(data); saveDb(); console.log(`Restored ${db.projects.length} projects from R2`); } catch {}
-    }
-  }).catch(() => {});
-
-  r2Get('history.json').then(data => {
-    if (data) { try { history = JSON.parse(data); saveHistory(); console.log('Restored history from R2'); } catch {} }
-  }).catch(() => {});
+  // 3. Try R2 (await before serving)
+  try {
+    const dbData = await r2Get('db.json');
+    if (dbData) { db = JSON.parse(dbData); saveDb(); console.log(`Restored ${db.projects.length} projects from R2`); }
+  } catch {}
+  try {
+    const histData = await r2Get('history.json');
+    if (histData) { history = JSON.parse(histData); saveHistory(); console.log('Restored history from R2'); }
+  } catch {}
 
   loadHistoryLocal();
 }
@@ -202,18 +207,25 @@ function loadHistoryLocal() {
   } catch {}
 }
 
-boot();
+boot().then(() => {
+  if (db.projects.length > 0) pingAll();
+  setInterval(pingAll, db.config.pingIntervalHours * 60 * 60 * 1000);
+});
 
 // === Ping ===
 async function doPing(project) {
   const tmpl = getTemplate(project.template);
   if (!tmpl) return { name: project.name, ok: false, error: 'unknown template' };
-  const url = tmpl.buildUrl(project.fields);
-  const headers = tmpl.buildHeaders(project.fields);
-  const method = tmpl.method || 'GET';
-  const body = tmpl.body || null;
+  let url, headers, method, body;
+  try {
+    url = tmpl.buildUrl(project.fields);
+    headers = tmpl.buildHeaders(project.fields);
+    method = tmpl.method || 'GET';
+    body = tmpl.body || null;
+  } catch (e) { return { name: project.name, ok: false, error: e.message, ms: 0 }; }
   return new Promise((resolve) => {
-    const parsed = new URL(url);
+    let parsed;
+    try { parsed = new URL(url); } catch { resolve({ name: project.name, ok: false, error: 'invalid URL', ms: 0 }); return; }
     const start = Date.now();
     const isHttps = parsed.protocol === 'https:';
     const lib = isHttps ? https : require('http');
@@ -248,9 +260,6 @@ async function pingAll() {
   saveHistory();
   return results;
 }
-
-if (db.projects.length > 0) pingAll();
-setInterval(pingAll, db.config.pingIntervalHours * 60 * 60 * 1000);
 
 // === Auth ===
 function checkAuth(req, url) {

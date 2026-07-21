@@ -306,7 +306,7 @@
             const t = templates.find(x => x.id === p.template);
             const ping = p.lastPing;
             const status = ping ? (ping.ok ? `<span class="badge badge-ok">${ping.status} ${ping.ms}ms</span>` : `<span class="badge badge-error">${ping.error||ping.status}</span>`) : '<span class="badge badge-pending">-</span>';
-            const fields = Object.entries(p.fields).map(([k,v]) => `${k}: ${v}`).join(' · ');
+            const fields = Object.entries(p.fields).map(([k,v]) => `${escH(k)}: ${escH(v)}`).join(' · ');
             const histId = `hist-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
             // History table
@@ -318,7 +318,7 @@
                         <thead><tr><th>Time</th><th>Status</th><th>Response</th></tr></thead>
                         <tbody>${hist.map(h => `<tr>
                             <td>${new Date(h.time).toLocaleString()}</td>
-                            <td class="${h.ok ? 'ok' : 'error'}">${h.ok ? `✓ ${h.status}` : `✗ ${h.error||h.status}`}</td>
+                            <td class="${h.ok ? 'ok' : 'error'}">${h.ok ? `✓ ${h.status}` : `✗ ${escH(h.error||h.status)}`}</td>
                             <td>${h.ms}ms</td>
                         </tr>`).join('')}</tbody>
                     </table>
@@ -327,10 +327,10 @@
             if (editingName === p.name) {
                 const tmpl = templates.find(x => x.id === p.template);
                 const editFields = tmpl.fields.map(f =>
-                    `<div class="field"><label>${f.label}</label><input type="${f.secret?'password':'text'}" id="edit-${f.key}" value="${p.fields[f.key]||''}"></div>`
+                    `<div class="field"><label>${escH(f.label)}</label><input type="${f.secret?'password':'text'}" id="edit-${f.key}" value="${escH(p.fields[f.key]||'')}"></div>`
                 ).join('');
                 return `<div class="card">
-                    <div class="card-header"><span class="card-title">${p.name}</span>${status}</div>
+                    <div class="card-header"><span class="card-title">${escH(p.name)}</span>${status}</div>
                     <div class="card-meta">${p.template} · ${fields}</div>
                     <div class="edit-fields">${editFields}</div>
                     <div class="card-actions">
@@ -341,7 +341,7 @@
             }
 
             return `<div class="card">
-                <div class="card-header"><span class="card-title">${p.name}</span>${status}</div>
+                <div class="card-header"><span class="card-title">${escH(p.name)}</span>${status}</div>
                 <div class="card-meta">${p.template} · ${fields}</div>
                 ${historyHtml}
                 <div class="card-actions">
@@ -358,6 +358,7 @@
         }
 
         function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+        function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
         function startEdit(name) { editingName = name; loadProjects(); }
         function cancelEdit() { editingName = null; loadProjects(); }

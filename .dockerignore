@@ -1,3 +1,7 @@
 *
+!package.json
 !server.js
 !index.html
+!Dockerfile
+!.dockerignore
+!.gitignore

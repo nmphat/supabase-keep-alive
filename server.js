@@ -6,10 +6,73 @@ const https = require('https');
 const PORT = process.env.PORT || 3000;
 const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
 const PING_INTERVAL_HOURS = parseInt(process.env.PING_INTERVAL_HOURS || '12', 10);
-const PROJECTS_FILE = path.join(__dirname, 'data', 'projects.txt');
-const HISTORY_FILE = path.join(__dirname, 'data', 'history.json');
+const DATA_DIR = path.join(__dirname, 'data');
+const DB_FILE = path.join(DATA_DIR, 'db.json');
+const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const LEGACY_FILE = path.join(DATA_DIR, 'projects.txt');
 const MAX_HISTORY = 20;
 const startTs = Date.now();
+
+// === R2 Storage ===
+let S3Client, PutObjectCommand, GetObjectCommand;
+let r2Client = null;
+const R2_ENDPOINT = process.env.R2_ENDPOINT || '';
+const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY || '';
+const R2_SECRET_KEY = process.env.R2_SECRET_KEY || '';
+const R2_BUCKET = process.env.R2_BUCKET || '';
+const R2_ENABLED = !!(R2_ENDPOINT && R2_ACCESS_KEY && R2_SECRET_KEY && R2_BUCKET);
+
+if (R2_ENABLED) {
+  try {
+    const s3 = require('@aws-sdk/client-s3');
+    S3Client = s3.S3Client;
+    PutObjectCommand = s3.PutObjectCommand;
+    GetObjectCommand = s3.GetObjectCommand;
+    r2Client = new S3Client({
+      region: 'auto',
+      endpoint: R2_ENDPOINT,
+      forcePathStyle: true,
+      credentials: { accessKeyId: R2_ACCESS_KEY, secretAccessKey: R2_SECRET_KEY }
+    });
+    console.log('R2 storage enabled');
+  } catch (e) {
+    console.error(`R2 init failed: ${e.message}`);
+  }
+}
+
+async function r2Get(key) {
+  if (!r2Client) return null;
+  try {
+    const res = await r2Client.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    return await res.Body.transformToString();
+  } catch { return null; }
+}
+
+async function r2Put(key, body) {
+  if (!r2Client) return;
+  await r2Client.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: body, ContentType: 'application/json' }));
+}
+
+// === Write Mutex ===
+let writing = false;
+const writeQueue = [];
+
+function enqueueWrite(key, data) {
+  writeQueue.push({ key, data });
+  if (writing) return;
+  writing = true;
+  (async () => {
+    while (writeQueue.length) {
+      const item = writeQueue.shift();
+      const localPath = item.key === 'db.json' ? DB_FILE : HISTORY_FILE;
+      try { fs.mkdirSync(path.dirname(localPath), { recursive: true }); } catch {}
+      fs.writeFileSync(localPath, item.data);
+      try { await r2Put(item.key, item.data); }
+      catch (e) { console.error(`R2 write ${item.key} failed: ${e.message}`); }
+    }
+    writing = false;
+  })();
+}
 
 // === Templates ===
 const TEMPLATES = [
@@ -25,21 +88,13 @@ const TEMPLATES = [
   },
   {
     id: 'vercel', name: 'Vercel', icon: '▲',
-    fields: [
-      { key: 'domain', label: 'Domain', placeholder: 'my-app.vercel.app', required: true }
-    ],
-    buildUrl: (f) => `https://${f.domain}/`,
-    buildHeaders: () => ({}),
-    method: 'GET'
+    fields: [{ key: 'domain', label: 'Domain', placeholder: 'my-app.vercel.app', required: true }],
+    buildUrl: (f) => `https://${f.domain}/`, buildHeaders: () => ({}), method: 'GET'
   },
   {
     id: 'render', name: 'Render', icon: '🟢',
-    fields: [
-      { key: 'domain', label: 'Domain', placeholder: 'my-app.onrender.com', required: true }
-    ],
-    buildUrl: (f) => `https://${f.domain}/`,
-    buildHeaders: () => ({}),
-    method: 'GET'
+    fields: [{ key: 'domain', label: 'Domain', placeholder: 'my-app.onrender.com', required: true }],
+    buildUrl: (f) => `https://${f.domain}/`, buildHeaders: () => ({}), method: 'GET'
   },
   {
     id: 'neon', name: 'Neon', icon: '🐘',
@@ -49,140 +104,107 @@ const TEMPLATES = [
     ],
     buildUrl: (f) => `https://${f.host}/sql`,
     buildHeaders: (f) => ({ 'Neon-Connection-String': `postgresql://user:${f.password}@${f.host}/main` }),
-    method: 'POST',
-    body: '{"query": "SELECT 1"}'
+    method: 'POST', body: '{"query": "SELECT 1"}'
   },
   {
     id: 'railway', name: 'Railway', icon: '🚂',
-    fields: [
-      { key: 'domain', label: 'Domain', placeholder: 'my-app.up.railway.app', required: true }
-    ],
-    buildUrl: (f) => `https://${f.domain}/`,
-    buildHeaders: () => ({}),
-    method: 'GET'
+    fields: [{ key: 'domain', label: 'Domain', placeholder: 'my-app.up.railway.app', required: true }],
+    buildUrl: (f) => `https://${f.domain}/`, buildHeaders: () => ({}), method: 'GET'
   },
   {
     id: 'cf-workers', name: 'Cloudflare Workers', icon: '☁️',
-    fields: [
-      { key: 'domain', label: 'Domain', placeholder: 'my-worker.workers.dev', required: true }
-    ],
-    buildUrl: (f) => `https://${f.domain}/`,
-    buildHeaders: () => ({}),
-    method: 'GET'
+    fields: [{ key: 'domain', label: 'Domain', placeholder: 'my-worker.workers.dev', required: true }],
+    buildUrl: (f) => `https://${f.domain}/`, buildHeaders: () => ({}), method: 'GET'
   },
   {
     id: 'generic', name: 'Generic HTTP', icon: '🌐',
-    fields: [
-      { key: 'url', label: 'URL', placeholder: 'https://example.com/health', required: true }
-    ],
-    buildUrl: (f) => f.url,
-    buildHeaders: () => ({}),
-    method: 'GET'
+    fields: [{ key: 'url', label: 'URL', placeholder: 'https://example.com/health', required: true }],
+    buildUrl: (f) => f.url, buildHeaders: () => ({}), method: 'GET'
   }
 ];
 
 function getTemplate(id) { return TEMPLATES.find(t => t.id === id); }
 
-// === Projects ===
-let projects = [];
-let history = {}; // { projectName: [{ ok, status, ms, time, error? }] }
+// === State ===
+let db = { version: 2, config: { pingIntervalHours: PING_INTERVAL_HOURS }, projects: [] };
+let history = {};
 
-function loadProjects() {
+function parseLegacyProjects(content) {
+  return content.split('\n').filter(l => l.trim()).map(l => {
+    const firstPipe = l.indexOf('|');
+    const secondPipe = l.indexOf('|', firstPipe + 1);
+    if (firstPipe === -1 || secondPipe === -1) return null;
+    const name = l.substring(0, firstPipe);
+    const template = l.substring(firstPipe + 1, secondPipe);
+    const fieldsStr = l.substring(secondPipe + 1);
+    if (!fieldsStr.includes('=')) {
+      if (template.includes('supabase.co')) {
+        const ref = template.replace('https://', '').replace('.supabase.co', '');
+        return { name, template: 'supabase', fields: { ref, anon_key: fieldsStr } };
+      }
+      return { name, template: 'generic', fields: { url: template } };
+    }
+    const fields = {};
+    fieldsStr.split(';').forEach(pair => { const eq = pair.indexOf('='); if (eq > 0) fields[pair.substring(0, eq)] = pair.substring(eq + 1); });
+    return { name, template, fields };
+  }).filter(Boolean);
+}
+
+function saveDb() { enqueueWrite('db.json', JSON.stringify(db, null, 2)); }
+function saveHistory() { enqueueWrite('history.json', JSON.stringify(history)); }
+
+// Boot sequence
+function boot() {
+  // 1. Try local db.json
   try {
-    if (fs.existsSync(PROJECTS_FILE)) {
-      const content = fs.readFileSync(PROJECTS_FILE, 'utf8');
+    if (fs.existsSync(DB_FILE)) {
+      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      console.log(`Loaded ${db.projects.length} projects from local db.json`);
+      loadHistoryLocal();
+      return;
+    }
+  } catch (e) { console.error(`db.json parse error: ${e.message}`); }
+
+  // 2. Try legacy projects.txt (migration)
+  try {
+    if (fs.existsSync(LEGACY_FILE)) {
+      const content = fs.readFileSync(LEGACY_FILE, 'utf8');
       if (content.trim()) {
-        projects = content.split('\n').filter(l => l.trim()).map(l => {
-          const firstPipe = l.indexOf('|');
-          const secondPipe = l.indexOf('|', firstPipe + 1);
-          if (firstPipe === -1 || secondPipe === -1) return null;
-          const name = l.substring(0, firstPipe);
-          const template = l.substring(firstPipe + 1, secondPipe);
-          const fieldsStr = l.substring(secondPipe + 1);
-          if (!fieldsStr.includes('=')) {
-            const url = template;
-            const key = fieldsStr;
-            if (url.includes('supabase.co')) {
-              const ref = url.replace('https://', '').replace('.supabase.co', '');
-              return { name, template: 'supabase', fields: { ref, anon_key: key } };
-            }
-            return { name, template: 'generic', fields: { url } };
-          }
-          const fields = {};
-          fieldsStr.split(';').forEach(pair => {
-            const eq = pair.indexOf('=');
-            if (eq > 0) fields[pair.substring(0, eq)] = pair.substring(eq + 1);
-          });
-          return { name, template, fields };
-        }).filter(Boolean);
+        db.projects = parseLegacyProjects(content);
+        console.log(`Migrated ${db.projects.length} projects from projects.txt`);
+        saveDb();
+        try { fs.unlinkSync(LEGACY_FILE); } catch {}
+        loadHistoryLocal();
         return;
       }
     }
-  } catch (e) {}
-  projects = [];
-  saveProjects();
+  } catch {}
+
+  // 3. Try R2
+  r2Get('db.json').then(data => {
+    if (data) {
+      try { db = JSON.parse(data); saveDb(); console.log(`Restored ${db.projects.length} projects from R2`); } catch {}
+    }
+  }).catch(() => {});
+
+  r2Get('history.json').then(data => {
+    if (data) { try { history = JSON.parse(data); saveHistory(); console.log('Restored history from R2'); } catch {} }
+  }).catch(() => {});
+
+  loadHistoryLocal();
 }
 
-function loadHistory() {
+function loadHistoryLocal() {
   try {
     if (fs.existsSync(HISTORY_FILE)) {
       history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
     }
-  } catch { history = {}; }
+  } catch {}
 }
 
-function saveProjects() {
-  const dir = path.dirname(PROJECTS_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const content = projects.map(p => {
-    const fieldsStr = Object.entries(p.fields).map(([k, v]) => `${k}=${v}`).join(';');
-    return `${p.name}|${p.template}|${fieldsStr}`;
-  }).join('\n');
-  fs.writeFileSync(PROJECTS_FILE, content);
-}
-
-function saveHistory() {
-  const dir = path.dirname(HISTORY_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
-}
-
-function maskSecret(val) {
-  if (!val || val.length < 10) return '***';
-  return val.slice(0, 3) + '...' + val.slice(-3);
-}
-
-function maskProject(p) {
-  const tmpl = getTemplate(p.template);
-  const maskedFields = { ...p.fields };
-  if (tmpl) tmpl.fields.forEach(f => { if (f.secret && maskedFields[f.key]) maskedFields[f.key] = maskSecret(maskedFields[f.key]); });
-  const h = history[p.name] || [];
-  const lastPing = h.length > 0 ? h[h.length - 1] : null;
-  return { name: p.name, template: p.template, fields: maskedFields, lastPing, lastPingTime: lastPing?.time || null, pingHistory: h };
-}
-
-function validateName(name) {
-  if (!name || name.trim().length === 0 || name.length > 255) return false;
-  if (/[\n\r\0|]/.test(name)) return false;
-  return true;
-}
+boot();
 
 // === Ping ===
-async function pingProject(project) {
-  const result = await doPing(project);
-  const entry = { ok: result.ok, status: result.status, ms: result.ms, time: new Date().toISOString(), error: result.error };
-  if (!history[project.name]) history[project.name] = [];
-  history[project.name].push(entry);
-  if (history[project.name].length > MAX_HISTORY) history[project.name] = history[project.name].slice(-MAX_HISTORY);
-  return result;
-}
-
-async function pingProjectNoMutate(template, fields) {
-  const tmpl = getTemplate(template);
-  if (!tmpl) return { ok: false, error: 'unknown template' };
-  return doPing({ template, fields });
-}
-
 async function doPing(project) {
   const tmpl = getTemplate(project.template);
   if (!tmpl) return { name: project.name, ok: false, error: 'unknown template' };
@@ -209,20 +231,31 @@ async function doPing(project) {
   });
 }
 
+async function pingProject(project) {
+  const result = await doPing(project);
+  if (!history[project.name]) history[project.name] = [];
+  history[project.name].push({ ok: result.ok, status: result.status, ms: result.ms, time: new Date().toISOString(), error: result.error });
+  if (history[project.name].length > MAX_HISTORY) history[project.name] = history[project.name].slice(-MAX_HISTORY);
+  return result;
+}
+
 let lastPingTime = null;
 async function pingAll() {
-  const results = await Promise.all(projects.map(p => pingProject(p)));
+  const results = await Promise.all(db.projects.map(p => pingProject(p)));
   lastPingTime = new Date().toISOString();
-  console.log(`[${lastPingTime}] Ping all: ${results.filter(r => r.ok).length}/${results.length} alive`);
+  console.log(`[${lastPingTime}] Ping: ${results.filter(r => r.ok).length}/${results.length} alive`);
+  saveDb();
   saveHistory();
   return results;
 }
 
+if (db.projects.length > 0) pingAll();
+setInterval(pingAll, db.config.pingIntervalHours * 60 * 60 * 1000);
+
 // === Auth ===
 function checkAuth(req, url) {
   if (!AUTH_TOKEN) return true;
-  const auth = req.headers['authorization'] || '';
-  if (auth === `Bearer ${AUTH_TOKEN}`) return true;
+  if ((req.headers['authorization'] || '') === `Bearer ${AUTH_TOKEN}`) return true;
   if (url && url.searchParams.get('token') === AUTH_TOKEN) return true;
   return false;
 }
@@ -240,65 +273,73 @@ function json(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+function validateName(name) {
+  if (!name || name.trim().length === 0 || name.length > 255) return false;
+  if (/[\n\r\0|]/.test(name)) return false;
+  return true;
+}
+
+function maskSecret(val) {
+  if (!val || val.length < 10) return '***';
+  return val.slice(0, 3) + '...' + val.slice(-3);
+}
+
+function maskProject(p) {
+  const tmpl = getTemplate(p.template);
+  const maskedFields = { ...p.fields };
+  if (tmpl) tmpl.fields.forEach(f => { if (f.secret && maskedFields[f.key]) maskedFields[f.key] = maskSecret(maskedFields[f.key]); });
+  const h = history[p.name] || [];
+  const lastPing = h.length > 0 ? h[h.length - 1] : null;
+  return { name: p.name, template: p.template, fields: maskedFields, lastPing, lastPingTime: lastPing?.time || null, pingHistory: h };
+}
+
 function matchRoute(pattern, pathname) {
   const regex = new RegExp('^' + pattern.replace(/:[^/]+/g, '([^/]+)') + '$');
   const m = pathname.match(regex);
   return m ? m.slice(1) : null;
 }
 
-// === Boot ===
-loadProjects();
-loadHistory();
-if (projects.length > 0) pingAll();
-setInterval(pingAll, PING_INTERVAL_HOURS * 60 * 60 * 1000);
-
+// === Server ===
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
-  // Serve index.html
   if (pathname === '/' && req.method === 'GET') {
     try { const c = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(c); }
     catch { res.writeHead(500); res.end('Error'); }
     return;
   }
 
-  // Health (auth required)
   if (pathname === '/api/health' && req.method === 'GET') {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
-    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: projects.length, lastPing: lastPingTime, pingIntervalHours: PING_INTERVAL_HOURS });
+    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, pingIntervalHours: db.config.pingIntervalHours, r2Enabled: R2_ENABLED });
   }
 
-  // Templates (auth required)
   if (pathname === '/api/templates' && req.method === 'GET') {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
     return json(res, 200, TEMPLATES.map(t => ({ id: t.id, name: t.name, icon: t.icon, fields: t.fields })));
   }
 
-  // Auth check
   if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
 
-  // List projects
   if (pathname === '/api/projects' && req.method === 'GET') {
-    return json(res, 200, projects.map(maskProject));
+    return json(res, 200, db.projects.map(maskProject));
   }
 
-  // Add project
   if (pathname === '/api/projects' && req.method === 'POST') {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
     const { name, template, fields } = body;
     if (!validateName(name)) return json(res, 400, { error: 'Invalid name' });
     if (!getTemplate(template)) return json(res, 400, { error: 'Unknown template' });
-    if (projects.some(p => p.name === name)) return json(res, 409, { error: 'Name exists' });
+    if (db.projects.some(p => p.name === name)) return json(res, 409, { error: 'Name exists' });
     const tmpl = getTemplate(template);
     for (const f of tmpl.fields) { if (f.required && (!fields || !fields[f.key])) return json(res, 400, { error: `Missing: ${f.label}` }); }
-    projects.push({ name, template, fields: fields || {} });
-    saveProjects();
+    db.projects.push({ name, template, fields: fields || {} });
+    saveDb();
     return json(res, 201, { success: true });
   }
 
-  // Test ping
   if (pathname === '/api/test' && req.method === 'POST') {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
@@ -306,47 +347,44 @@ const server = http.createServer(async (req, res) => {
     if (!getTemplate(template)) return json(res, 400, { error: 'Unknown template' });
     const tmpl = getTemplate(template);
     for (const f of tmpl.fields) { if (f.required && (!fields || !fields[f.key])) return json(res, 400, { error: `Missing: ${f.label}` }); }
-    const result = await pingProjectNoMutate(template, fields);
+    const result = await doPing({ template, fields });
     return json(res, 200, result);
   }
 
-  // Update project
   let m = matchRoute('/api/projects/:name', pathname);
   if (m && req.method === 'PUT') {
     const name = decodeURIComponent(m[0]);
-    const idx = projects.findIndex(p => p.name === name);
+    const idx = db.projects.findIndex(p => p.name === name);
     if (idx === -1) return json(res, 404, { error: 'Not found' });
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
-    if (body.fields) projects[idx].fields = { ...projects[idx].fields, ...body.fields };
-    saveProjects();
+    if (body.fields) db.projects[idx].fields = { ...db.projects[idx].fields, ...body.fields };
+    saveDb();
     return json(res, 200, { success: true });
   }
 
-  // Delete project
   if (m && req.method === 'DELETE') {
     const name = decodeURIComponent(m[0]);
-    const idx = projects.findIndex(p => p.name === name);
+    const idx = db.projects.findIndex(p => p.name === name);
     if (idx === -1) return json(res, 404, { error: 'Not found' });
-    projects.splice(idx, 1);
+    db.projects.splice(idx, 1);
     delete history[name];
-    saveProjects();
+    saveDb();
     saveHistory();
     return json(res, 200, { success: true });
   }
 
-  // Ping single
   m = matchRoute('/api/ping/:name', pathname);
   if (m && req.method === 'GET') {
     const name = decodeURIComponent(m[0]);
-    const project = projects.find(p => p.name === name);
+    const project = db.projects.find(p => p.name === name);
     if (!project) return json(res, 404, { error: 'Not found' });
     const result = await pingProject(project);
+    saveDb();
     saveHistory();
     return json(res, 200, result);
   }
 
-  // Ping all
   if (pathname === '/api/ping-all' && req.method === 'GET') {
     const results = await pingAll();
     return json(res, 200, results);
@@ -356,5 +394,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Keep-alive server running on port ${PORT}${AUTH_TOKEN ? ' (auth enabled)' : ' (no auth)'} | ping interval: ${PING_INTERVAL_HOURS}h`);
+  console.log(`Keep-alive v2.2 on port ${PORT} | interval: ${db.config.pingIntervalHours}h | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
 });

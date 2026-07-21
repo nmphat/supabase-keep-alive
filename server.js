@@ -59,6 +59,10 @@ const writeQueue = [];
 
 function enqueueWrite(key, data) {
   writeQueue.push({ key, data });
+  processWriteQueue();
+}
+
+function processWriteQueue() {
   if (writing) return;
   writing = true;
   (async () => {
@@ -73,6 +77,7 @@ function enqueueWrite(key, data) {
       }
     } finally {
       writing = false;
+      if (writeQueue.length) processWriteQueue();
     }
   })();
 }
@@ -309,6 +314,13 @@ function validateName(name) {
   return true;
 }
 
+function validateTemplateFields(template, fields) {
+  const tmpl = getTemplate(template);
+  if (!tmpl) return 'Unknown template';
+  for (const f of tmpl.fields) { if (f.required && (!fields || !fields[f.key])) return `Missing: ${f.label}`; }
+  return null;
+}
+
 function maskSecret(val) {
   if (!val || val.length < 10) return '***';
   return val.slice(0, 3) + '...' + val.slice(-3);
@@ -362,10 +374,9 @@ const server = http.createServer(async (req, res) => {
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
     const { name, template, fields } = body;
     if (!validateName(name)) return json(res, 400, { error: 'Invalid name' });
-    if (!getTemplate(template)) return json(res, 400, { error: 'Unknown template' });
+    const fieldErr = validateTemplateFields(template, fields);
+    if (fieldErr) return json(res, 400, { error: fieldErr });
     if (db.projects.some(p => p.name === name)) return json(res, 409, { error: 'Name exists' });
-    const tmpl = getTemplate(template);
-    for (const f of tmpl.fields) { if (f.required && (!fields || !fields[f.key])) return json(res, 400, { error: `Missing: ${f.label}` }); }
     db.projects.push({ name, template, fields: fields || {} });
     saveDb();
     return json(res, 201, { success: true });
@@ -375,9 +386,8 @@ const server = http.createServer(async (req, res) => {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
     const { template, fields } = body;
-    if (!getTemplate(template)) return json(res, 400, { error: 'Unknown template' });
-    const tmpl = getTemplate(template);
-    for (const f of tmpl.fields) { if (f.required && (!fields || !fields[f.key])) return json(res, 400, { error: `Missing: ${f.label}` }); }
+    const fieldErr2 = validateTemplateFields(template, fields);
+    if (fieldErr2) return json(res, 400, { error: fieldErr2 });
     const result = await doPing({ template, fields });
     return json(res, 200, result);
   }
@@ -391,8 +401,8 @@ const server = http.createServer(async (req, res) => {
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
     if (body.fields) {
       const merged = { ...db.projects[idx].fields, ...body.fields };
-      const tmpl = getTemplate(db.projects[idx].template);
-      for (const f of tmpl.fields) { if (f.required && !merged[f.key]) return json(res, 400, { error: `Missing: ${f.label}` }); }
+      const fieldErr3 = validateTemplateFields(db.projects[idx].template, merged);
+      if (fieldErr3) return json(res, 400, { error: fieldErr3 });
       db.projects[idx].fields = merged;
     }
     saveDb();

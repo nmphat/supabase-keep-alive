@@ -16,7 +16,7 @@ const TEMPLATES = [
       { key: 'ref', label: 'Project Ref', placeholder: 'xyzxyz', required: true },
       { key: 'anon_key', label: 'Anon Key', placeholder: 'eyJhbG...', required: true, secret: true }
     ],
-    buildUrl: (f) => `https://${f.ref}.supabase.co/rest/v1/`,
+    buildUrl: (f) => `https://${f.ref}.supabase.co/auth/v1/health`,
     buildHeaders: (f) => ({ 'apikey': f.anon_key, 'Authorization': `Bearer ${f.anon_key}` }),
     method: 'GET'
   },

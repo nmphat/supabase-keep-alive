@@ -73,7 +73,6 @@ function enqueueWrite(key, data) {
       }
     } finally {
       writing = false;
-      if (writeQueue.length) { const item = writeQueue.shift(); enqueueWrite(item.key, item.data); }
     }
   })();
 }
@@ -218,6 +217,9 @@ boot().then(() => {
   });
   if (db.projects.length > 0) pingAll();
   setInterval(pingAll, db.config.pingIntervalHours * 60 * 60 * 1000);
+}).catch(e => {
+  console.error('Boot failed:', e.message);
+  server.listen(PORT, '0.0.0.0', () => { console.log(`Started in degraded mode on port ${PORT}`); });
 });
 
 // === Ping ===
@@ -329,6 +331,7 @@ function matchRoute(pattern, pathname) {
 
 // === Server ===
 const server = http.createServer(async (req, res) => {
+  try {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
@@ -423,6 +426,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   json(res, 404, { error: 'Not found' });
+  } catch (e) { json(res, 500, { error: 'Internal error' }); }
 });
 
 

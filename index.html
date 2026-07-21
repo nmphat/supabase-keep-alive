@@ -11,6 +11,12 @@
             --muted: #a1a1aa; --destructive: #ef4444;
             --ring: #d4d4d8; --radius: 6px;
         }
+        [data-theme="light"] {
+            --bg: #ffffff; --surface: #f4f4f5; --border: #e4e4e7;
+            --primary: #18181b; --primary-fg: #fafafa;
+            --muted: #71717a; --destructive: #ef4444;
+            --ring: #a1a1aa;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--primary); font-size: 14px; line-height: 1.5; }
         .container { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
@@ -123,6 +129,7 @@
                     <span class="interval-info" id="interval">-</span>
                 </div>
                 <button class="logout-btn" onclick="doLogout()">Logout</button>
+                <button class="btn-ghost" onclick="toggleTheme()" id="theme-btn" aria-label="Toggle theme" style="font-size:18px;cursor:pointer;padding:4px 8px;">◐</button>
             </div>
         </header>
 
@@ -163,6 +170,21 @@
         let TOKEN = localStorage.getItem('auth_token') || '';
         let templates = [];
         let editingName = null;
+
+        // === Theme ===
+        function initTheme() {
+            const saved = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = saved || (prefersDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+        }
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+        }
+        initTheme();
 
         // === Auth ===
         function initToken() {

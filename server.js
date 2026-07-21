@@ -4,7 +4,7 @@ const path = require('path');
 const https = require('https');
 
 const PORT = process.env.PORT || 3000;
-const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
+const AUTH_TOKEN = (process.env.AUTH_TOKEN || '').trim();
 const PING_INTERVAL_HOURS = parseInt(process.env.PING_INTERVAL_HOURS || '12', 10);
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -16,10 +16,10 @@ const startTs = Date.now();
 // === R2 Storage ===
 let S3Client, PutObjectCommand, GetObjectCommand;
 let r2Client = null;
-const R2_ENDPOINT = process.env.R2_ENDPOINT || '';
-const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY || '';
-const R2_SECRET_KEY = process.env.R2_SECRET_KEY || '';
-const R2_BUCKET = process.env.R2_BUCKET || '';
+const R2_ENDPOINT = (process.env.R2_ENDPOINT || '').trim();
+const R2_ACCESS_KEY = (process.env.R2_ACCESS_KEY || '').trim();
+const R2_SECRET_KEY = (process.env.R2_SECRET_KEY || '').trim();
+const R2_BUCKET = (process.env.R2_BUCKET || '').trim();
 const R2_ENABLED = !!(R2_ENDPOINT && R2_ACCESS_KEY && R2_SECRET_KEY && R2_BUCKET);
 
 if (R2_ENABLED) {

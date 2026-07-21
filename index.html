@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Supabase Keep-Alive</title>
+    <title>Keep-Alive</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 20px; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 20px; }
         .container { max-width: 800px; margin: 0 auto; }
         header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #1e293b; }
         h1 { margin: 0; font-size: 24px; color: #38bdf8; }
@@ -16,19 +17,32 @@
         .btn.secondary:hover { background: #475569; }
         .btn.danger { background: #ef4444; }
         .btn.danger:hover { background: #f87171; }
+        .btn.sm { padding: 4px 10px; font-size: 13px; }
         .card { background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 15px; border: 1px solid #334155; }
-        .project-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .project-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         .project-name { font-weight: 600; font-size: 18px; color: #f8fafc; }
+        .project-template { font-size: 13px; color: #94a3b8; }
         .status { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; background: #1e293b; border: 1px solid #334155; }
         .status.ok { color: #4ade80; border-color: #22c55e; background: #052e16; }
         .status.error { color: #f87171; border-color: #ef4444; background: #450a0a; }
-        .project-url { font-size: 14px; color: #94a3b8; margin-bottom: 8px; word-break: break-all; }
-        .project-key { font-family: monospace; font-size: 13px; background: #0f172a; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-bottom: 15px; color: #cbd5e1; }
-        .actions { display: flex; gap: 10px; }
+        .project-fields { font-size: 13px; color: #94a3b8; margin-bottom: 12px; font-family: monospace; }
+        .actions { display: flex; gap: 8px; }
         .form-card { background: #1e293b; border-radius: 8px; padding: 20px; margin-bottom: 30px; border: 1px solid #334155; }
-        .form-row { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
-        input { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; }
-        input:focus { outline: none; border-color: #0ea5e9; }
+        .form-row { display: flex; gap: 15px; margin-bottom: 12px; flex-wrap: wrap; }
+        .form-row:last-child { margin-bottom: 0; }
+        label { font-size: 13px; color: #94a3b8; display: block; margin-bottom: 4px; }
+        input, select { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 10px; border-radius: 6px; width: 100%; }
+        input:focus, select:focus { outline: none; border-color: #0ea5e9; }
+        select { cursor: pointer; }
+        .field-group { flex: 1; min-width: 150px; }
+        #login-screen { display: flex; justify-content: center; align-items: center; min-height: 60vh; }
+        .login-card { background: #1e293b; border-radius: 12px; padding: 40px; width: 100%; max-width: 400px; text-align: center; border: 1px solid #334155; }
+        .login-card h2 { margin: 0 0 20px; color: #38bdf8; }
+        .login-card input { margin-bottom: 15px; text-align: center; }
+        .error-msg { color: #f87171; font-size: 13px; margin-top: 8px; display: none; }
+        .logout-btn { background: none; border: 1px solid #475569; color: #94a3b8; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .logout-btn:hover { border-color: #94a3b8; color: #e2e8f0; }
+        .hidden { display: none !important; }
         @media (max-width: 600px) {
             .form-row { flex-direction: column; }
             .meta { flex-direction: column; gap: 5px; }
@@ -36,28 +50,50 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div class="login-card">
+            <h2>🛡️ Keep-Alive</h2>
+            <input type="password" id="login-token" placeholder="Enter auth token" onkeydown="if(event.key==='Enter')doLogin()">
+            <button class="btn" onclick="doLogin()" style="width:100%">Login</button>
+            <div class="error-msg" id="login-error">Invalid token</div>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard" class="container hidden">
         <header>
-            <h1>🛡️ Supabase Keep-Alive</h1>
-            <div class="meta">
-                <span id="uptime">Uptime: calculating...</span>
-                <span id="last-ping">Last run: never</span>
+            <h1>🛡️ Keep-Alive</h1>
+            <div style="display:flex;align-items:center;gap:15px;">
+                <div class="meta">
+                    <span id="uptime">Uptime: ...</span>
+                    <span id="last-ping">Last run: never</span>
+                </div>
+                <button class="logout-btn" id="logout-btn" onclick="doLogout()">Logout</button>
             </div>
         </header>
 
-        <div style="margin-bottom: 30px;">
-            <button class="btn" onclick="pingAll()">Ping All Projects</button>
+        <div style="margin-bottom: 25px;">
+            <button class="btn" onclick="pingAll()">Ping All</button>
         </div>
 
         <div class="form-card">
-            <h2 style="margin-top: 0; margin-bottom: 15px; font-size: 18px;">Add Project</h2>
+            <h3 style="margin:0 0 15px;font-size:16px;">Add Project</h3>
             <div class="form-row">
-                <input type="text" id="new-name" placeholder="Project Name (lowercase, hyphens)">
-                <input type="text" id="new-url" placeholder="Supabase URL (https://xxx.supabase.co)">
+                <div class="field-group">
+                    <label>Template</label>
+                    <select id="tmpl-select" onchange="renderFields()"></select>
+                </div>
             </div>
             <div class="form-row">
-                <input type="password" id="new-key" placeholder="Anon Key">
-                <button class="btn" onclick="addProject()" style="width: auto; white-space: nowrap;">Add Project</button>
+                <div class="field-group">
+                    <label>Name</label>
+                    <input type="text" id="new-name" placeholder="my-project">
+                </div>
+                <div id="dynamic-fields"></div>
+            </div>
+            <div class="form-row" style="justify-content:flex-end;">
+                <button class="btn" onclick="addProject()">Add</button>
             </div>
         </div>
 
@@ -66,99 +102,164 @@
 
     <script>
         const API = '';
-        
-        async function fetchJSON(url, opts = {}) {
-            const res = await fetch(API + url, { ...opts, headers: { 'Content-Type': 'application/json', ...opts.headers } });
+        let TOKEN = localStorage.getItem('auth_token') || '';
+        let templates = [];
+
+        // === Auth ===
+        async function checkAuth() {
+            if (!TOKEN) { showLogin(); return; }
+            try {
+                const res = await apiFetch('/api/projects');
+                if (res === 401) { showLogin(); return; }
+                showDashboard();
+                loadProjects();
+                loadTemplates();
+            } catch { showLogin(); }
+        }
+
+        function showLogin() {
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('dashboard').classList.add('hidden');
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+        }
+
+        async function doLogin() {
+            const token = document.getElementById('login-token').value.trim();
+            if (!token) return;
+            TOKEN = token;
+            localStorage.setItem('auth_token', token);
+            try {
+                const res = await apiFetch('/api/projects');
+                if (res === 401) {
+                    document.getElementById('login-error').style.display = 'block';
+                    TOKEN = '';
+                    localStorage.removeItem('auth_token');
+                    return;
+                }
+                document.getElementById('login-error').style.display = 'none';
+                showDashboard();
+                loadProjects();
+                loadTemplates();
+            } catch { document.getElementById('login-error').style.display = 'block'; }
+        }
+
+        function doLogout() {
+            TOKEN = '';
+            localStorage.removeItem('auth_token');
+            showLogin();
+        }
+
+        // === API ===
+        async function apiFetch(url, opts = {}) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
+            const res = await fetch(API + url, { ...opts, headers: { ...headers, ...opts.headers } });
+            if (res.status === 401) return 401;
             return res.json();
         }
 
-        async function loadProjects() {
-            const health = await fetchJSON('/api/health');
-            document.getElementById('uptime').textContent = `Uptime: ${formatTime(health.uptime)}`;
-            document.getElementById('last-ping').textContent = `Last run: ${health.lastPing ? new Date(health.lastPing).toLocaleTimeString() : 'never'}`;
+        // === Templates ===
+        async function loadTemplates() {
+            templates = await apiFetch('/api/templates');
+            const sel = document.getElementById('tmpl-select');
+            sel.innerHTML = templates.map(t => `<option value="${t.id}">${t.icon} ${t.name}</option>`).join('');
+            renderFields();
+        }
 
-            const projects = await fetchJSON('/api/projects');
+        function renderFields() {
+            const tmplId = document.getElementById('tmpl-select').value;
+            const tmpl = templates.find(t => t.id === tmplId);
+            if (!tmpl) return;
+            const container = document.getElementById('dynamic-fields');
+            container.innerHTML = tmpl.fields.map(f =>
+                `<div class="field-group">
+                    <label>${f.label}</label>
+                    <input type="${f.secret ? 'password' : 'text'}" id="field-${f.key}" placeholder="${f.placeholder || ''}">
+                </div>`
+            ).join('');
+        }
+
+        // === Projects ===
+        async function loadProjects() {
+            const health = await apiFetch('/api/health');
+            if (health === 401) return;
+            document.getElementById('uptime').textContent = `Uptime: ${fmtTime(health.uptime)}`;
+            document.getElementById('last-ping').textContent = `Last: ${health.lastPing ? new Date(health.lastPing).toLocaleTimeString() : 'never'}`;
+
+            const projects = await apiFetch('/api/projects');
+            if (projects === 401) return;
             const list = document.getElementById('projects-list');
-            list.innerHTML = projects.map(p => `
-                <div class="card" id="project-${p.name}">
+            if (!projects.length) {
+                list.innerHTML = '<div class="card" style="text-align:center;color:#94a3b8;">No projects yet. Add one above.</div>';
+                return;
+            }
+            list.innerHTML = projects.map(p => {
+                const tmpl = templates.find(t => t.id === p.template);
+                const icon = tmpl ? tmpl.icon : '🌐';
+                const fieldStr = Object.entries(p.fields).map(([k, v]) => `${k}: ${v}`).join('  ');
+                const ping = p.lastPing;
+                const statusHtml = ping ? `<span class="status ${ping.ok ? 'ok' : 'error'}">${ping.ok ? `${ping.status} (${ping.ms}ms)` : `Error: ${ping.error || ping.status}`}</span>` : '<span class="status">-</span>';
+                return `
+                <div class="card">
                     <div class="project-header">
-                        <span class="project-name">${p.name}</span>
-                        <span class="status" id="status-${p.name}">Unknown</span>
+                        <span><span class="project-name">${icon} ${p.name}</span> <span class="project-template">(${p.template})</span></span>
+                        ${statusHtml}
                     </div>
-                    <div class="project-url">${p.url}</div>
-                    <div class="project-key">${p.key}</div>
+                    <div class="project-fields">${fieldStr}</div>
                     <div class="actions">
-                        <button class="btn secondary" onclick="pingProject('${p.name}')">Ping</button>
-                        <button class="btn secondary" onclick="editProject('${p.name}', '${p.url}')">Edit</button>
-                        <button class="btn danger" onclick="deleteProject('${p.name}')">Remove</button>
+                        <button class="btn secondary sm" onclick="pingOne('${p.name}')">Ping</button>
+                        <button class="btn danger sm" onclick="deleteProject('${p.name}')">Remove</button>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
         }
 
         async function addProject() {
             const name = document.getElementById('new-name').value.trim();
-            const url = document.getElementById('new-url').value.trim();
-            const key = document.getElementById('new-key').value.trim();
+            const template = document.getElementById('tmpl-select').value;
+            const tmpl = templates.find(t => t.id === template);
+            if (!name || !tmpl) return;
 
-            if (!name || !url || !key) return alert('All fields required');
-            
-            await fetchJSON('/api/projects', {
-                method: 'POST',
-                body: JSON.stringify({ name, url, key })
-            });
-            
+            const fields = {};
+            for (const f of tmpl.fields) {
+                const el = document.getElementById(`field-${f.key}`);
+                if (el) fields[f.key] = el.value.trim();
+                if (f.required && !fields[f.key]) return alert(`Missing: ${f.label}`);
+            }
+
+            const res = await apiFetch('/api/projects', { method: 'POST', body: JSON.stringify({ name, template, fields }) });
+            if (res.error) return alert(res.error);
             document.getElementById('new-name').value = '';
-            document.getElementById('new-url').value = '';
-            document.getElementById('new-key').value = '';
+            tmpl.fields.forEach(f => { const el = document.getElementById(`field-${f.key}`); if (el) el.value = ''; });
             loadProjects();
         }
 
         async function deleteProject(name) {
             if (!confirm(`Delete ${name}?`)) return;
-            await fetchJSON(`/api/projects/${name}`, { method: 'DELETE' });
+            await apiFetch(`/api/projects/${name}`, { method: 'DELETE' });
             loadProjects();
         }
 
-        async function pingProject(name) {
-            const statusEl = document.getElementById(`status-${name}`);
-            statusEl.textContent = 'Pinging...';
-            statusEl.className = 'status';
-            
-            const res = await fetchJSON(`/api/ping/${name}`);
-            statusEl.textContent = res.ok ? `${res.status} (${res.ms}ms)` : `Error: ${res.error || res.status}`;
-            statusEl.className = `status ${res.ok ? 'ok' : 'error'}`;
+        async function pingOne(name) {
+            await apiFetch(`/api/ping/${name}`);
+            loadProjects();
         }
 
         async function pingAll() {
-            const results = await fetchJSON('/api/ping-all');
-            results.forEach(r => {
-                const statusEl = document.getElementById(`status-${r.name}`);
-                statusEl.textContent = r.ok ? `${r.status} (${r.ms}ms)` : `Error: ${r.error || r.status}`;
-                statusEl.className = `status ${r.ok ? 'ok' : 'error'}`;
-            });
-        }
-
-        async function editProject(name, currentUrl) {
-            const newUrl = prompt('New URL:', currentUrl);
-            if (!newUrl) return;
-            const newKey = prompt('New Key (leave empty to keep current):');
-            
-            await fetchJSON(`/api/projects/${name}`, {
-                method: 'PUT',
-                body: JSON.stringify({ url: newUrl, ...(newKey ? { key: newKey } : {}) })
-            });
+            await apiFetch('/api/ping-all');
             loadProjects();
         }
 
-        function formatTime(seconds) {
-            const d = Math.floor(seconds / 86400);
-            const h = Math.floor((seconds % 86400) / 3600);
-            const m = Math.floor((seconds % 3600) / 60);
+        function fmtTime(s) {
+            const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
             return `${d > 0 ? d + 'd ' : ''}${h}h ${m}m`;
         }
 
-        loadProjects();
+        checkAuth();
     </script>
 </body>
 </html>

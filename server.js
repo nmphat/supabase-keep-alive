@@ -71,7 +71,10 @@ function enqueueWrite(key, data) {
         try { await r2Put(item.key, item.data); }
         catch (e) { console.error(`R2 write ${item.key} failed: ${e.message}`); }
       }
-    } finally { writing = false; }
+    } finally {
+      writing = false;
+      if (writeQueue.length) { writing = true; enqueueWrite(writeQueue.shift().key, writeQueue.shift().data); }
+    }
   })();
 }
 
@@ -157,7 +160,7 @@ function parseLegacyProjects(content) {
 }
 
 function saveDb() { enqueueWrite('db.json', JSON.stringify(db, null, 2)); }
-function saveHistory() { enqueueWrite('history.json', JSON.stringify(history)); }
+function saveHistory() { enqueueWrite('history.json', JSON.stringify(history, null, 2)); }
 
 // Boot sequence
 async function boot() {
@@ -190,11 +193,11 @@ async function boot() {
   try {
     const dbData = await r2Get('db.json');
     if (dbData) { db = JSON.parse(dbData); saveDb(); console.log(`Restored ${db.projects.length} projects from R2`); }
-  } catch {}
+  } catch (e) { console.error(`R2 read db.json: ${e.message}`); }
   try {
     const histData = await r2Get('history.json');
     if (histData) { history = JSON.parse(histData); saveHistory(); console.log('Restored history from R2'); }
-  } catch {}
+  } catch (e) { console.error(`R2 read history.json: ${e.message}`); }
 
   loadHistoryLocal();
 }
@@ -207,7 +210,12 @@ function loadHistoryLocal() {
   } catch {}
 }
 
+let pinging = false;
+
 boot().then(() => {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Keep-alive v2.2 on port ${PORT} | interval: ${db.config.pingIntervalHours}h | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
+  });
   if (db.projects.length > 0) pingAll();
   setInterval(pingAll, db.config.pingIntervalHours * 60 * 60 * 1000);
 });
@@ -228,12 +236,11 @@ async function doPing(project) {
     try { parsed = new URL(url); } catch { resolve({ name: project.name, ok: false, error: 'invalid URL', ms: 0 }); return; }
     const start = Date.now();
     const isHttps = parsed.protocol === 'https:';
-    const lib = isHttps ? https : require('http');
+    const lib = isHttps ? https : http;
     const opts = { hostname: parsed.hostname, port: parsed.port || (isHttps ? 443 : 80), path: parsed.pathname + parsed.search, method, headers, timeout: 5000 };
     const req = lib.request(opts, (res) => {
       const ms = Date.now() - start;
-      let data = '';
-      res.on('data', chunk => data += chunk);
+      res.resume();
       res.on('end', () => resolve({ name: project.name, ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, ms }));
     });
     req.on('timeout', () => { req.destroy(); resolve({ name: project.name, ok: false, error: 'timeout', ms: 5000 }); });
@@ -253,12 +260,15 @@ async function pingProject(project) {
 
 let lastPingTime = null;
 async function pingAll() {
+  if (pinging) return [];
+  pinging = true;
+  try {
   const results = await Promise.all(db.projects.map(p => pingProject(p)));
   lastPingTime = new Date().toISOString();
   console.log(`[${lastPingTime}] Ping: ${results.filter(r => r.ok).length}/${results.length} alive`);
-  saveDb();
   saveHistory();
   return results;
+  } finally { pinging = false; }
 }
 
 // === Auth ===
@@ -272,8 +282,11 @@ function checkAuth(req, url) {
 function parseBody(req) {
   return new Promise((resolve) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1024 * 1024) { req.destroy(); resolve(null); }
+    });
+    req.on('end', () => { if (body.length <= 1024 * 1024) { try { resolve(JSON.parse(body)); } catch { resolve(null); } } });
   });
 }
 
@@ -367,7 +380,11 @@ const server = http.createServer(async (req, res) => {
     if (idx === -1) return json(res, 404, { error: 'Not found' });
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
-    if (body.fields) db.projects[idx].fields = { ...db.projects[idx].fields, ...body.fields };
+    if (body.fields) {
+      const tmpl = getTemplate(db.projects[idx].template);
+      for (const f of tmpl.fields) { if (f.required && !body.fields[f.key]) return json(res, 400, { error: `Missing: ${f.label}` }); }
+      db.projects[idx].fields = { ...db.projects[idx].fields, ...body.fields };
+    }
     saveDb();
     return json(res, 200, { success: true });
   }
@@ -402,6 +419,4 @@ const server = http.createServer(async (req, res) => {
   json(res, 404, { error: 'Not found' });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Keep-alive v2.2 on port ${PORT} | interval: ${db.config.pingIntervalHours}h | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
-});
+

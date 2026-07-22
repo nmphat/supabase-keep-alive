@@ -86,7 +86,8 @@
 
         /* Interval display */
         .interval-control { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--muted); }
-        .interval-control input { background: var(--bg); border: 1px solid var(--border); color: var(--primary); padding: 2px 6px; border-radius: var(--radius); font-size: 13px; width: 80px; }
+        .interval-control input[type="number"] { background: var(--bg); border: 1px solid var(--border); color: var(--primary); padding: 2px 6px; border-radius: var(--radius); font-size: 13px; width: 56px; }
+        .interval-control select { background: var(--bg); border: 1px solid var(--border); color: var(--primary); padding: 2px 6px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
 
         /* History */
         .history-toggle { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
@@ -344,8 +345,10 @@
             }
 
             const intervalMin = p.intervalMinutes || 5;
-            const display = formatInterval(intervalMin);
-            const sliderHtml = `<div class="interval-control"><span>Ping mỗi</span><input type="text" value="${display}" onblur="parseAndUpdate('${esc(p.name)}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></div>`;
+            const { value, unit } = toValueUnit(intervalMin);
+            const selId = `sel-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const numId = `num-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const sliderHtml = `<div class="interval-control"><span>Ping mỗi</span><input type="number" id="${numId}" value="${value}" min="1" onblur="commitInterval('${esc(p.name)}')"><select id="${selId}" onchange="commitInterval('${esc(p.name)}')"><option value="s"${unit==='s'?' selected':''}>giây</option><option value="m"${unit==='m'?' selected':''}>phút</option><option value="h"${unit==='h'?' selected':''}>giờ</option></select></div>`;
 
             return `<div class="card">
                 <div class="card-header"><span class="card-title">${escH(p.name)}</span>${status}</div>
@@ -372,28 +375,21 @@
             return h % 1 === 0 ? `${h} giờ` : `${h.toFixed(1)} giờ`;
         }
 
-        function parseInterval(input) {
-            const s = input.trim().toLowerCase();
-            // "30s", "30 giây", "30sec"
-            let m = s.match(/^([\d.]+)\s*(s|sec|giây|giay)$/);
-            if (m) return Math.round(parseFloat(m[1]) / 60 * 1000) / 1000;
-            // "1m", "5 phút", "1 min", "1 phut"
-            m = s.match(/^([\d.]+)\s*(m|min|phút|phut|p)$/);
-            if (m) return parseFloat(m[1]);
-            // "1h", "2 giờ", "1 hr", "1 gio"
-            m = s.match(/^([\d.]+)\s*(h|hr|giờ|gio|g)$/);
-            if (m) return parseFloat(m[1]) * 60;
-            // bare number = minutes
-            m = s.match(/^([\d.]+)$/);
-            if (m) return parseFloat(m[1]);
-            return null;
+        function toValueUnit(minutes) {
+            if (minutes < 1) return { value: Math.round(minutes * 60), unit: 's' };
+            if (minutes < 60) return { value: Math.round(minutes), unit: 'm' };
+            if (minutes % 60 === 0) return { value: minutes / 60, unit: 'h' };
+            return { value: Math.round(minutes), unit: 'm' };
         }
 
-        async function parseAndUpdate(name, input) {
-            const minutes = parseInterval(input);
-            if (minutes === null || minutes < 0.5 || minutes > 1440) return loadProjects(); // invalid, revert display
-            await updateInterval(name, minutes);
-            loadProjects(); // refresh to show canonical display
+        function commitInterval(name) {
+            const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
+            const v = Number(document.getElementById(`num-${safe}`).value);
+            const u = document.getElementById(`sel-${safe}`).value;
+            if (!v || v < 1) return loadProjects();
+            const minutes = u === 's' ? v / 60 : u === 'h' ? v * 60 : v;
+            if (minutes < 0.5 || minutes > 1440) return loadProjects();
+            updateInterval(name, minutes);
         }
 
         function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }

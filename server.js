@@ -300,6 +300,7 @@ function parseBody(req) {
       done = true;
       try { resolve(JSON.parse(body)); } catch { resolve(null); }
     });
+    req.on('error', () => { if (!done) { done = true; resolve(null); } });
   });
 }
 
@@ -436,7 +437,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   json(res, 404, { error: 'Not found' });
-  } catch (e) { json(res, 500, { error: 'Internal error' }); }
+  } catch (e) { if (!res.headersSent) json(res, 500, { error: 'Internal error' }); else res.destroy(); }
 });
 
 

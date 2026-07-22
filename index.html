@@ -86,7 +86,7 @@
 
         /* Interval display */
         .interval-control { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--muted); }
-        .interval-control select { background: var(--bg); border: 1px solid var(--border); color: var(--primary); padding: 2px 6px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
+        .interval-control input { background: var(--bg); border: 1px solid var(--border); color: var(--primary); padding: 2px 6px; border-radius: var(--radius); font-size: 13px; width: 80px; }
 
         /* History */
         .history-toggle { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
@@ -344,14 +344,8 @@
             }
 
             const intervalMin = p.intervalMinutes || 5;
-            const intervalLabel = formatInterval(intervalMin);
-            const selId = `sel-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            const options = [
-              [0.5,'30 giây'],[1,'1 phút'],[2,'2 phút'],[5,'5 phút'],[10,'10 phút'],[15,'15 phút'],
-              [30,'30 phút'],[60,'1 giờ'],[120,'2 giờ'],[180,'3 giờ'],[360,'6 giờ'],[720,'12 giờ'],[1440,'24 giờ']
-            ];
-            const optionHtml = options.map(([v,l]) => `<option value="${v}"${v===intervalMin?' selected':''}>${l}</option>`).join('');
-            const sliderHtml = `<div class="interval-control"><span>Ping mỗi</span><select id="${selId}" onchange="updateInterval('${esc(p.name)}', Number(this.value))">${optionHtml}</select></div>`;
+            const display = formatInterval(intervalMin);
+            const sliderHtml = `<div class="interval-control"><span>Ping mỗi</span><input type="text" value="${display}" onblur="parseAndUpdate('${esc(p.name)}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></div>`;
 
             return `<div class="card">
                 <div class="card-header"><span class="card-title">${escH(p.name)}</span>${status}</div>
@@ -376,6 +370,30 @@
             if (minutes < 60) return `${Math.round(minutes)} phút`;
             const h = minutes / 60;
             return h % 1 === 0 ? `${h} giờ` : `${h.toFixed(1)} giờ`;
+        }
+
+        function parseInterval(input) {
+            const s = input.trim().toLowerCase();
+            // "30s", "30 giây", "30sec"
+            let m = s.match(/^([\d.]+)\s*(s|sec|giây|giay)$/);
+            if (m) return Math.round(parseFloat(m[1]) / 60 * 1000) / 1000;
+            // "1m", "5 phút", "1 min", "1 phut"
+            m = s.match(/^([\d.]+)\s*(m|min|phút|phut|p)$/);
+            if (m) return parseFloat(m[1]);
+            // "1h", "2 giờ", "1 hr", "1 gio"
+            m = s.match(/^([\d.]+)\s*(h|hr|giờ|gio|g)$/);
+            if (m) return parseFloat(m[1]) * 60;
+            // bare number = minutes
+            m = s.match(/^([\d.]+)$/);
+            if (m) return parseFloat(m[1]);
+            return null;
+        }
+
+        async function parseAndUpdate(name, input) {
+            const minutes = parseInterval(input);
+            if (minutes === null || minutes < 0.5 || minutes > 1440) return loadProjects(); // invalid, revert display
+            await updateInterval(name, minutes);
+            loadProjects(); // refresh to show canonical display
         }
 
         function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }

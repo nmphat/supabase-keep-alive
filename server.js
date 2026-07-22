@@ -4,13 +4,14 @@ const path = require('path');
 const https = require('https');
 
 const PORT = process.env.PORT || 3000;
-const AUTH_TOKEN = (process.env.AUTH_TOKEN || '').trim();
-const PING_INTERVAL_HOURS = parseInt(process.env.PING_INTERVAL_HOURS || '12', 10);
+let AUTH_TOKEN = (process.env.AUTH_TOKEN || '').trim();
+let PING_INTERVAL_HOURS = parseInt(process.env.PING_INTERVAL_HOURS || '12', 10);
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const LEGACY_FILE = path.join(DATA_DIR, 'projects.txt');
 const MAX_HISTORY = 20;
+const INTERVALS = [0.5, 1, 5, 30, 60, 720, 1440];
 const startTs = Date.now();
 
 // === R2 Storage ===
@@ -20,6 +21,26 @@ const R2_ENDPOINT = (process.env.R2_ENDPOINT || '').trim();
 const R2_ACCESS_KEY = (process.env.R2_ACCESS_KEY || '').trim();
 const R2_SECRET_KEY = (process.env.R2_SECRET_KEY || '').trim();
 const R2_BUCKET = (process.env.R2_BUCKET || '').trim();
+
+function validateEnv() {
+  const errors = [];
+  const rawAuth = process.env.AUTH_TOKEN;
+  const r2Vars = [R2_ENDPOINT, R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET];
+  const r2Count = r2Vars.filter(v => v.length > 0).length;
+  if (r2Count > 0 && r2Count < 4) errors.push('R2: all 4 vars required or none');
+  if (R2_ENDPOINT && !R2_ENDPOINT.startsWith('https://')) errors.push('R2_ENDPOINT must start with https://');
+  if (rawAuth !== undefined && rawAuth.trim() === '') errors.push('AUTH_TOKEN is whitespace-only');
+  if (isNaN(PING_INTERVAL_HOURS) || PING_INTERVAL_HOURS <= 0) {
+    console.warn('PING_INTERVAL_HOURS invalid, defaulting to 12');
+    PING_INTERVAL_HOURS = 12;
+  }
+  if (errors.length) {
+    console.error('ENV VALIDATION FAILED:');
+    errors.forEach(e => console.error(`  - ${e}`));
+    process.exit(1);
+  }
+}
+validateEnv();
 const R2_ENABLED = !!(R2_ENDPOINT && R2_ACCESS_KEY && R2_SECRET_KEY && R2_BUCKET);
 
 if (R2_ENABLED) {
@@ -218,23 +239,38 @@ let pinging = false;
 
 boot().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Keep-alive v2.3 on port ${PORT} | default interval: ${db.config.defaultIntervalHours}h | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
+    console.log(`Keep-alive v2.4 on port ${PORT} | default interval: ${db.config.defaultIntervalMinutes || db.config.defaultIntervalHours || 12}min | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
   });
-  // Migration: add intervalHours to existing projects, fix config key rename
-  if (db.config.pingIntervalHours && !db.config.defaultIntervalHours) {
-    db.config.defaultIntervalHours = db.config.pingIntervalHours;
+  // Migration: config key rename
+  if (db.config.pingIntervalHours && !db.config.defaultIntervalMinutes) {
+    db.config.defaultIntervalMinutes = Math.round(db.config.pingIntervalHours * 60);
     delete db.config.pingIntervalHours;
   }
-  db.projects.forEach(p => { if (!p.intervalHours) p.intervalHours = db.config.defaultIntervalHours; });
+  if (db.config.defaultIntervalHours && !db.config.defaultIntervalMinutes) {
+    db.config.defaultIntervalMinutes = Math.round(db.config.defaultIntervalHours * 60);
+    delete db.config.defaultIntervalHours;
+  }
+  if (!db.config.defaultIntervalMinutes) db.config.defaultIntervalMinutes = 720;
+  // Migration: project intervalHours → intervalMinutes
+  db.projects.forEach(p => {
+    if (p.intervalHours && !p.intervalMinutes) {
+      p.intervalMinutes = Math.round(p.intervalHours * 60);
+      delete p.intervalHours;
+    }
+    if (!p.intervalMinutes) p.intervalMinutes = db.config.defaultIntervalMinutes;
+  });
+  saveDb();
   if (db.projects.length > 0) pingAll();
   // Per-project tick: check every 1 min
   setInterval(() => {
     const now = Date.now();
     db.projects.forEach(p => {
-      if (!p.intervalHours) return; // manual only
+      if (!p.intervalMinutes) return; // 0 = manual
       const h = history[p.name] || [];
       const last = h.length > 0 ? new Date(h[h.length - 1].time).getTime() : 0;
-      if (now - last >= p.intervalHours * 3600000) pingProject(p).then(() => { saveDb(); saveHistory(); });
+      if (now - last >= p.intervalMinutes * 60000) {
+        pingProject(p).then(() => { saveDb(); saveHistory(); });
+      }
     });
   }, 60000);
 }).catch(e => {
@@ -358,7 +394,7 @@ function maskProject(p) {
   if (tmpl) tmpl.fields.forEach(f => { if (f.secret && maskedFields[f.key]) maskedFields[f.key] = maskSecret(maskedFields[f.key]); });
   const h = history[p.name] || [];
   const lastPing = h.length > 0 ? h[h.length - 1] : null;
-  return { name: p.name, template: p.template, fields: maskedFields, intervalHours: p.intervalHours || db.config.defaultIntervalHours, lastPing, lastPingTime: lastPing?.time || null, pingHistory: h };
+  return { name: p.name, template: p.template, fields: maskedFields, intervalMinutes: p.intervalMinutes || db.config.defaultIntervalMinutes || 720, lastPing, lastPingTime: lastPing?.time || null, pingHistory: h };
 }
 
 function matchRoute(pattern, pathname) {
@@ -394,7 +430,7 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
-    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, defaultIntervalHours: db.config.defaultIntervalHours, r2Enabled: R2_ENABLED });
+    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, defaultIntervalMinutes: db.config.defaultIntervalMinutes || 720, r2Enabled: R2_ENABLED });
   }
 
   if (pathname === '/api/templates' && req.method === 'GET') {
@@ -417,7 +453,9 @@ const server = http.createServer(async (req, res) => {
     const fieldErr = validateTemplateFields(template, fields);
     if (fieldErr) return json(res, 400, { error: fieldErr });
     if (db.projects.some(p => p.name === name)) return json(res, 409, { error: 'Name exists' });
-    db.projects.push({ name, template, fields: fields || {}, intervalHours: body.intervalHours || db.config.defaultIntervalHours });
+    const intervalMinutes = body.intervalMinutes ?? db.config.defaultIntervalMinutes ?? 720;
+    if (intervalMinutes !== 0 && !INTERVALS.includes(intervalMinutes)) return json(res, 400, { error: `intervalMinutes must be one of: ${INTERVALS.join(', ')} or 0 (manual)` });
+    db.projects.push({ name, template, fields: fields || {}, intervalMinutes });
     saveDb();
     return json(res, 201, { success: true });
   }
@@ -439,7 +477,11 @@ const server = http.createServer(async (req, res) => {
     if (idx === -1) return json(res, 404, { error: 'Not found' });
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
-    if (body.intervalHours !== undefined) db.projects[idx].intervalHours = Math.max(0.083, Number(body.intervalHours) || db.config.defaultIntervalHours);
+    if (body.intervalMinutes !== undefined) {
+      if (body.intervalMinutes !== 0 && !INTERVALS.includes(body.intervalMinutes)) return json(res, 400, { error: `intervalMinutes must be one of: ${INTERVALS.join(', ')} or 0 (manual)` });
+      db.projects[idx].intervalMinutes = body.intervalMinutes;
+    }
+    if (body.intervalHours !== undefined) db.projects[idx].intervalMinutes = Math.round(body.intervalHours * 60); // legacy compat
     if (body.fields) {
       const merged = { ...db.projects[idx].fields, ...body.fields };
       const fieldErr3 = validateTemplateFields(db.projects[idx].template, merged);

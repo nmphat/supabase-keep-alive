@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Keep-Alive</title>
+    <link href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
     <style>
         :root {
             --bg: #09090b; --surface: #18181b; --border: #27272a;
@@ -85,10 +87,21 @@
         .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* Slider */
-        .interval-slider { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-        .interval-slider input[type="range"] { flex: 1; accent-color: var(--primary); height: 4px; }
-        .interval-slider .interval-val { font-size: 13px; font-weight: 600; min-width: 40px; text-align: right; }
+        /* noUiSlider overrides */
+        .interval-control { margin: 8px 0; }
+        .interval-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .interval-label strong { color: var(--primary); }
+        .interval-marks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; padding: 0 2px; }
+        .noUi-target { background: var(--border); border: none; border-radius: var(--radius); height: 6px; box-shadow: none; }
+        .noUi-connect { background: linear-gradient(90deg, #3b82f6, #6366f1); }
+        .noUi-handle { width: 18px; height: 18px; right: -9px; top: -6px; background: var(--primary); border: 2px solid #3b82f6; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3); cursor: grab; }
+        .noUi-handle:active { cursor: grabbing; }
+        .noUi-handle:before, .noUi-handle:after { display: none; }
+        .noUi-tooltip { background: var(--surface); color: var(--primary); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; padding: 2px 6px; }
+        .noUi-pips { padding: 0; }
+        .noUi-value { color: var(--muted); font-size: 11px; }
+        .noUi-marker { background: var(--muted); }
+        .noUi-marker-large { background: var(--primary); height: 8px; }
 
         /* History */
         .history-toggle { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
@@ -297,7 +310,7 @@
             if (h === 401) return;
             document.getElementById('uptime').textContent = `Up ${fmtTime(h.uptime)}`;
             document.getElementById('last-ping').textContent = h.lastPing ? new Date(h.lastPing).toLocaleTimeString() : 'never';
-            document.getElementById('interval').textContent = `default ${h.defaultIntervalHours}h`;
+            document.getElementById('interval').textContent = `default ${formatInterval(h.defaultIntervalMinutes || 720)}`;
 
             const ps = await api('/api/projects');
             if (ps === 401) return;
@@ -305,6 +318,7 @@
             const list = document.getElementById('projects-list');
             if (!ps.length) { list.innerHTML = '<div class="empty">No projects yet</div>'; return; }
             list.innerHTML = `<div class="projects-grid">${ps.map(p => renderCard(p)).join('')}</div>`;
+            initSliders();
         }
 
         function renderCard(p) {
@@ -345,9 +359,15 @@
                 </div>`;
             }
 
-            const intervalMin = Math.round((p.intervalHours || 12) * 60);
-            const intervalLabel = intervalMin >= 60 ? `${intervalMin/60}h` : `${intervalMin}m`;
-            const sliderHtml = `<div class="interval-slider"><span style="font-size:12px;color:var(--muted)">Interval</span><input type="range" min="5" max="1440" step="5" value="${intervalMin}" onchange="updateInterval('${esc(p.name)}', this.value)"><span class="interval-val">${intervalLabel}</span></div>`;
+            const intervalMin = p.intervalMinutes || 5;
+            const intervalLabel = formatInterval(intervalMin);
+            const sliderId = `slider-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const valId = `interval-val-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const sliderHtml = `<div class="interval-control">
+                <div class="interval-label">Monitor interval: <strong id="${valId}">${intervalLabel}</strong></div>
+                <div id="${sliderId}" data-interval="${intervalMin}" data-name="${esc(p.name)}"></div>
+                <div class="interval-marks"><span>30s</span><span>1m</span><span>5m</span><span>30m</span><span>1h</span><span>12h</span><span>24h</span></div>
+            </div>`;
 
             return `<div class="card">
                 <div class="card-header"><span class="card-title">${escH(p.name)}</span>${status}</div>
@@ -365,6 +385,36 @@
         function toggleHistory(id) {
             const el = document.getElementById(id);
             el.classList.toggle('history-hidden');
+        }
+
+        function formatInterval(minutes) {
+            if (minutes < 1) return `${Math.round(minutes * 60)}s`;
+            if (minutes < 60) return `${Math.round(minutes)}m`;
+            const h = minutes / 60;
+            return h % 1 === 0 ? `${h}h` : `${h.toFixed(1)}h`;
+        }
+
+        function initSliders() {
+            document.querySelectorAll('.interval-control > div[id^="slider-"]').forEach(el => {
+                if (el.noUiSlider) return;
+                const current = Number(el.dataset.interval) || 5;
+                const name = el.dataset.name;
+                const valId = el.id.replace('slider-', 'interval-val-');
+                noUiSlider.create(el, {
+                    start: current,
+                    snap: true,
+                    connect: 'lower',
+                    range: { 'min': 0.5, '14%': 1, '28%': 5, '42%': 30, '57%': 60, '71%': 720, 'max': 1440 },
+                    tooltips: { to: formatInterval, from: Number },
+                    pips: { mode: 'values', values: [0.5, 1, 5, 30, 60, 720, 1440], density: 5, format: { to: formatInterval, from: Number } }
+                });
+                el.noUiSlider.on('update', (values) => {
+                    document.getElementById(valId).textContent = formatInterval(Number(values[0]));
+                });
+                el.noUiSlider.on('change', (values) => {
+                    updateInterval(name, Number(values[0]));
+                });
+            });
         }
 
         function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
@@ -396,9 +446,7 @@
         }
 
         async function updateInterval(name, minutes) {
-            const hours = Math.round(Number(minutes) / 60 * 100) / 100;
-            await api(`/api/projects/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ intervalHours: hours }) });
-            loadProjects();
+            await api(`/api/projects/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ intervalMinutes: minutes }) });
         }
 
         async function pingAll() {

@@ -139,7 +139,7 @@ const TEMPLATES = [
 function getTemplate(id) { return TEMPLATES.find(t => t.id === id); }
 
 // === State ===
-let db = { version: 2, config: { pingIntervalHours: PING_INTERVAL_HOURS }, projects: [] };
+let db = { version: 3, config: { defaultIntervalHours: PING_INTERVAL_HOURS }, projects: [] };
 let history = {};
 
 function parseLegacyProjects(content) {
@@ -218,10 +218,21 @@ let pinging = false;
 
 boot().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Keep-alive v2.2 on port ${PORT} | interval: ${db.config.pingIntervalHours}h | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
+    console.log(`Keep-alive v2.3 on port ${PORT} | default interval: ${db.config.defaultIntervalHours}h | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
   });
+  // Migration: add intervalHours to existing projects
+  db.projects.forEach(p => { if (!p.intervalHours) p.intervalHours = db.config.defaultIntervalHours; });
   if (db.projects.length > 0) pingAll();
-  setInterval(pingAll, db.config.pingIntervalHours * 60 * 60 * 1000);
+  // Per-project tick: check every 1 min
+  setInterval(() => {
+    const now = Date.now();
+    db.projects.forEach(p => {
+      if (!p.intervalHours) return; // manual only
+      const h = history[p.name] || [];
+      const last = h.length > 0 ? new Date(h[h.length - 1].time).getTime() : 0;
+      if (now - last >= p.intervalHours * 3600000) pingProject(p).then(() => { saveDb(); saveHistory(); });
+    });
+  }, 60000);
 }).catch(e => {
   console.error('Boot failed:', e.message);
   server.listen(PORT, '0.0.0.0', () => { console.log(`Started in degraded mode on port ${PORT}`); });
@@ -343,7 +354,7 @@ function maskProject(p) {
   if (tmpl) tmpl.fields.forEach(f => { if (f.secret && maskedFields[f.key]) maskedFields[f.key] = maskSecret(maskedFields[f.key]); });
   const h = history[p.name] || [];
   const lastPing = h.length > 0 ? h[h.length - 1] : null;
-  return { name: p.name, template: p.template, fields: maskedFields, lastPing, lastPingTime: lastPing?.time || null, pingHistory: h };
+  return { name: p.name, template: p.template, fields: maskedFields, intervalHours: p.intervalHours || db.config.defaultIntervalHours, lastPing, lastPingTime: lastPing?.time || null, pingHistory: h };
 }
 
 function matchRoute(pattern, pathname) {
@@ -379,7 +390,7 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
-    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, pingIntervalHours: db.config.pingIntervalHours, r2Enabled: R2_ENABLED });
+    return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, defaultIntervalHours: db.config.defaultIntervalHours, r2Enabled: R2_ENABLED });
   }
 
   if (pathname === '/api/templates' && req.method === 'GET') {
@@ -402,7 +413,7 @@ const server = http.createServer(async (req, res) => {
     const fieldErr = validateTemplateFields(template, fields);
     if (fieldErr) return json(res, 400, { error: fieldErr });
     if (db.projects.some(p => p.name === name)) return json(res, 409, { error: 'Name exists' });
-    db.projects.push({ name, template, fields: fields || {} });
+    db.projects.push({ name, template, fields: fields || {}, intervalHours: body.intervalHours || db.config.defaultIntervalHours });
     saveDb();
     return json(res, 201, { success: true });
   }
@@ -424,6 +435,7 @@ const server = http.createServer(async (req, res) => {
     if (idx === -1) return json(res, 404, { error: 'Not found' });
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
+    if (body.intervalHours !== undefined) db.projects[idx].intervalHours = Math.max(0.083, Number(body.intervalHours) || db.config.defaultIntervalHours);
     if (body.fields) {
       const merged = { ...db.projects[idx].fields, ...body.fields };
       const fieldErr3 = validateTemplateFields(db.projects[idx].template, merged);

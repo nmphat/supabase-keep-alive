@@ -85,6 +85,11 @@
         .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* Slider */
+        .interval-slider { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+        .interval-slider input[type="range"] { flex: 1; accent-color: var(--primary); height: 4px; }
+        .interval-slider .interval-val { font-size: 13px; font-weight: 600; min-width: 40px; text-align: right; }
+
         /* History */
         .history-toggle { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
         .history-toggle:hover { color: var(--primary); }
@@ -292,7 +297,7 @@
             if (h === 401) return;
             document.getElementById('uptime').textContent = `Up ${fmtTime(h.uptime)}`;
             document.getElementById('last-ping').textContent = h.lastPing ? new Date(h.lastPing).toLocaleTimeString() : 'never';
-            document.getElementById('interval').textContent = `every ${h.pingIntervalHours}h`;
+            document.getElementById('interval').textContent = `default ${h.defaultIntervalHours}h`;
 
             const ps = await api('/api/projects');
             if (ps === 401) return;
@@ -340,9 +345,14 @@
                 </div>`;
             }
 
+            const intervalMin = Math.round((p.intervalHours || 12) * 60);
+            const intervalLabel = intervalMin >= 60 ? `${intervalMin/60}h` : `${intervalMin}m`;
+            const sliderHtml = `<div class="interval-slider"><span style="font-size:12px;color:var(--muted)">Interval</span><input type="range" min="5" max="1440" step="5" value="${intervalMin}" onchange="updateInterval('${esc(p.name)}', this.value)"><span class="interval-val">${intervalLabel}</span></div>`;
+
             return `<div class="card">
                 <div class="card-header"><span class="card-title">${escH(p.name)}</span>${status}</div>
                 <div class="card-meta">${p.template} · ${fields}</div>
+                ${sliderHtml}
                 ${historyHtml}
                 <div class="card-actions">
                     <button class="btn-ghost btn-sm" onclick="pingOne('${esc(p.name)}')">Ping</button>
@@ -382,6 +392,12 @@
 
         async function pingOne(name) {
             await api(`/api/ping/${encodeURIComponent(name)}`);
+            loadProjects();
+        }
+
+        async function updateInterval(name, minutes) {
+            const hours = Math.round(Number(minutes) / 60 * 100) / 100;
+            await api(`/api/projects/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ intervalHours: hours }) });
             loadProjects();
         }
 

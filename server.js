@@ -366,7 +366,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname === '/api/health' && req.method === 'GET') {
+  if (pathname === '/api/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
     return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, pingIntervalHours: db.config.pingIntervalHours, r2Enabled: R2_ENABLED });
   }

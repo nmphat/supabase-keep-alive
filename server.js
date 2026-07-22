@@ -220,7 +220,11 @@ boot().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Keep-alive v2.3 on port ${PORT} | default interval: ${db.config.defaultIntervalHours}h | R2: ${R2_ENABLED ? 'on' : 'off'} | auth: ${AUTH_TOKEN ? 'on' : 'off'}`);
   });
-  // Migration: add intervalHours to existing projects
+  // Migration: add intervalHours to existing projects, fix config key rename
+  if (db.config.pingIntervalHours && !db.config.defaultIntervalHours) {
+    db.config.defaultIntervalHours = db.config.pingIntervalHours;
+    delete db.config.pingIntervalHours;
+  }
   db.projects.forEach(p => { if (!p.intervalHours) p.intervalHours = db.config.defaultIntervalHours; });
   if (db.projects.length > 0) pingAll();
   // Per-project tick: check every 1 min

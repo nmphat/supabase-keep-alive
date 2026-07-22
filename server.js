@@ -71,7 +71,7 @@ function processWriteQueue() {
         const item = writeQueue.shift();
         const localPath = item.key === 'db.json' ? DB_FILE : HISTORY_FILE;
         try { fs.mkdirSync(path.dirname(localPath), { recursive: true }); } catch {}
-        try { fs.writeFileSync(localPath, item.data); } catch (e) { console.error(`Local write ${item.key} failed: ${e.message}`); }
+        try { await fs.promises.writeFile(localPath, item.data); } catch (e) { console.error(`Local write ${item.key} failed: ${e.message}`); }
         try { await r2Put(item.key, item.data); }
         catch (e) { console.error(`R2 write ${item.key} failed: ${e.message}`); }
       }
@@ -259,6 +259,7 @@ async function doPing(project) {
 
 async function pingProject(project) {
   const result = await doPing(project);
+  if (!result.ok) console.log(`[${project.name}] ping failed: ${result.error || result.status} (${result.ms}ms)`);
   if (!history[project.name]) history[project.name] = [];
   history[project.name].push({ ok: result.ok, status: result.status, ms: result.ms, time: new Date().toISOString(), error: result.error });
   if (history[project.name].length > MAX_HISTORY) history[project.name] = history[project.name].slice(-MAX_HISTORY);
@@ -270,7 +271,13 @@ async function pingAll() {
   if (pinging) return [];
   pinging = true;
   try {
-  const results = await Promise.all(db.projects.map(p => pingProject(p)));
+  const CONCURRENCY = 10;
+  const results = [];
+  for (let i = 0; i < db.projects.length; i += CONCURRENCY) {
+    const batch = db.projects.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(batch.map(p => pingProject(p)));
+    results.push(...batchResults);
+  }
   lastPingTime = new Date().toISOString();
   console.log(`[${lastPingTime}] Ping: ${results.filter(r => r.ok).length}/${results.length} alive`);
   saveHistory();
@@ -301,6 +308,7 @@ function parseBody(req) {
       try { resolve(JSON.parse(body)); } catch { resolve(null); }
     });
     req.on('error', () => { if (!done) { done = true; resolve(null); } });
+    req.on('close', () => { if (!done) { done = true; resolve(null); } });
   });
 }
 
@@ -310,9 +318,11 @@ function json(res, status, data) {
 }
 
 function validateName(name) {
-  if (!name || name.trim().length === 0 || name.length > 255) return false;
+  if (!name || typeof name !== 'string') return false;
+  name = name.trim();
+  if (name.length === 0 || name.length > 255) return false;
   if (/[\n\r\0|]/.test(name)) return false;
-  return true;
+  return name;
 }
 
 function validateTemplateFields(template, fields) {
@@ -343,14 +353,16 @@ function matchRoute(pattern, pathname) {
 }
 
 // === Server ===
+let indexHtml = '';
+try { indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'); } catch {}
+
 const server = http.createServer(async (req, res) => {
   try {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
   if (pathname === '/' && req.method === 'GET') {
-    try { const c = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(c); }
-    catch { res.writeHead(500); res.end('Error'); }
+    res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(indexHtml);
     return;
   }
 
@@ -373,8 +385,9 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/projects' && req.method === 'POST') {
     const body = await parseBody(req);
     if (!body) return json(res, 400, { error: 'Invalid JSON' });
-    const { name, template, fields } = body;
-    if (!validateName(name)) return json(res, 400, { error: 'Invalid name' });
+    let { name, template, fields } = body;
+    name = validateName(name);
+    if (!name) return json(res, 400, { error: 'Invalid name' });
     const fieldErr = validateTemplateFields(template, fields);
     if (fieldErr) return json(res, 400, { error: fieldErr });
     if (db.projects.some(p => p.name === name)) return json(res, 409, { error: 'Name exists' });
@@ -439,5 +452,17 @@ const server = http.createServer(async (req, res) => {
   json(res, 404, { error: 'Not found' });
   } catch (e) { if (!res.headersSent) json(res, 500, { error: 'Internal error' }); else res.destroy(); }
 });
+
+// Graceful shutdown
+async function shutdown() {
+  console.log('Shutting down, flushing writes...');
+  const deadline = Date.now() + 5000;
+  while (writeQueue.length && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 

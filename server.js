@@ -366,6 +366,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    });
+    res.end();
+    return;
+  }
+
   if (pathname === '/api/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     if (!checkAuth(req, url)) return json(res, 401, { error: 'Unauthorized' });
     return json(res, 200, { ok: true, uptime: Math.floor((Date.now() - startTs) / 1000), projects: db.projects.length, lastPing: lastPingTime, pingIntervalHours: db.config.pingIntervalHours, r2Enabled: R2_ENABLED });

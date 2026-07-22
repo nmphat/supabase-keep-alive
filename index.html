@@ -2,10 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Keep-Alive</title>
-    <link href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
     <style>
         :root {
             --bg: #09090b; --surface: #18181b; --border: #27272a;
@@ -87,21 +84,9 @@
         .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* noUiSlider overrides */
-        .interval-control { margin: 8px 0; }
-        .interval-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-        .interval-label strong { color: var(--primary); }
-        .interval-marks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; padding: 0 2px; }
-        .noUi-target { background: var(--border); border: none; border-radius: var(--radius); height: 6px; box-shadow: none; }
-        .noUi-connect { background: linear-gradient(90deg, #3b82f6, #6366f1); }
-        .noUi-handle { width: 18px; height: 18px; right: -9px; top: -6px; background: var(--primary); border: 2px solid #3b82f6; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3); cursor: grab; }
-        .noUi-handle:active { cursor: grabbing; }
-        .noUi-handle:before, .noUi-handle:after { display: none; }
-        .noUi-tooltip { background: var(--surface); color: var(--primary); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; padding: 2px 6px; }
-        .noUi-pips { padding: 0; }
-        .noUi-value { color: var(--muted); font-size: 11px; }
-        .noUi-marker { background: var(--muted); }
-        .noUi-marker-large { background: var(--primary); height: 8px; }
+        /* Interval display */
+        .interval-control { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--muted); }
+        .interval-control select { background: var(--bg); border: 1px solid var(--border); color: var(--primary); padding: 2px 6px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
 
         /* History */
         .history-toggle { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
@@ -318,7 +303,6 @@
             const list = document.getElementById('projects-list');
             if (!ps.length) { list.innerHTML = '<div class="empty">No projects yet</div>'; return; }
             list.innerHTML = `<div class="projects-grid">${ps.map(p => renderCard(p)).join('')}</div>`;
-            initSliders();
         }
 
         function renderCard(p) {
@@ -361,13 +345,13 @@
 
             const intervalMin = p.intervalMinutes || 5;
             const intervalLabel = formatInterval(intervalMin);
-            const sliderId = `slider-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            const valId = `interval-val-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            const sliderHtml = `<div class="interval-control">
-                <div class="interval-label">Monitor interval: <strong id="${valId}">${intervalLabel}</strong></div>
-                <div id="${sliderId}" data-interval="${intervalMin}" data-name="${esc(p.name)}"></div>
-                <div class="interval-marks"><span>30s</span><span>1m</span><span>5m</span><span>30m</span><span>1h</span><span>12h</span><span>24h</span></div>
-            </div>`;
+            const selId = `sel-${p.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const options = [
+              [0.5,'30 giây'],[1,'1 phút'],[2,'2 phút'],[5,'5 phút'],[10,'10 phút'],[15,'15 phút'],
+              [30,'30 phút'],[60,'1 giờ'],[120,'2 giờ'],[180,'3 giờ'],[360,'6 giờ'],[720,'12 giờ'],[1440,'24 giờ']
+            ];
+            const optionHtml = options.map(([v,l]) => `<option value="${v}"${v===intervalMin?' selected':''}>${l}</option>`).join('');
+            const sliderHtml = `<div class="interval-control"><span>Ping mỗi</span><select id="${selId}" onchange="updateInterval('${esc(p.name)}', Number(this.value))">${optionHtml}</select></div>`;
 
             return `<div class="card">
                 <div class="card-header"><span class="card-title">${escH(p.name)}</span>${status}</div>
@@ -388,48 +372,10 @@
         }
 
         function formatInterval(minutes) {
-            if (minutes < 1) return `${Math.round(minutes * 60)}s`;
-            if (minutes < 60) return `${Math.round(minutes)}m`;
+            if (minutes < 1) return `${Math.round(minutes * 60)} giây`;
+            if (minutes < 60) return `${Math.round(minutes)} phút`;
             const h = minutes / 60;
-            return h % 1 === 0 ? `${h}h` : `${h.toFixed(1)}h`;
-        }
-
-        function buildIntervalValues() {
-          const v = [];
-          for (const seg of [
-            { from: 0.5, to: 1, step: 1/60 },
-            { from: 1, to: 5, step: 1/6 },
-            { from: 5, to: 30, step: 1 },
-            { from: 30, to: 60, step: 5 },
-            { from: 60, to: 720, step: 30 },
-            { from: 720, to: 1440, step: 60 },
-          ]) {
-            for (let i = seg.from; i <= seg.to + 0.001; i += seg.step) v.push(Math.round(i * 1000) / 1000);
-          }
-          return [...new Set(v)];
-        }
-        const INTERVAL_VALUES = buildIntervalValues();
-
-        function initSliders() {
-            document.querySelectorAll('.interval-control > div[id^="slider-"]').forEach(el => {
-                if (el.noUiSlider) return;
-                const current = Number(el.dataset.interval) || 5;
-                const name = el.dataset.name;
-                const valId = el.id.replace('slider-', 'interval-val-');
-                noUiSlider.create(el, {
-                    start: [current],
-                    connect: 'lower',
-                    range: INTERVAL_VALUES,
-                    tooltips: { to: formatInterval, from: Number },
-                    pips: { mode: 'values', values: [0.5, 1, 5, 30, 60, 720, 1440], density: 5, format: { to: formatInterval, from: Number } }
-                });
-                el.noUiSlider.on('update', (values) => {
-                    document.getElementById(valId).textContent = formatInterval(Number(values[0]));
-                });
-                el.noUiSlider.on('change', (values) => {
-                    updateInterval(name, Number(values[0]));
-                });
-            });
+            return h % 1 === 0 ? `${h} giờ` : `${h.toFixed(1)} giờ`;
         }
 
         function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }

@@ -11,7 +11,7 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const LEGACY_FILE = path.join(DATA_DIR, 'projects.txt');
 const MAX_HISTORY = 20;
-const INTERVALS = [0.5, 1, 5, 30, 60, 720, 1440];
+const INTERVALS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
 const startTs = Date.now();
 
 // === R2 Storage ===

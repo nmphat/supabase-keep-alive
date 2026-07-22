@@ -394,6 +394,22 @@
             return h % 1 === 0 ? `${h}h` : `${h.toFixed(1)}h`;
         }
 
+        function buildIntervalValues() {
+          const v = [];
+          for (const seg of [
+            { from: 0.5, to: 1, step: 1/60 },
+            { from: 1, to: 5, step: 1/6 },
+            { from: 5, to: 30, step: 1 },
+            { from: 30, to: 60, step: 5 },
+            { from: 60, to: 720, step: 30 },
+            { from: 720, to: 1440, step: 60 },
+          ]) {
+            for (let i = seg.from; i <= seg.to + 0.001; i += seg.step) v.push(Math.round(i * 1000) / 1000);
+          }
+          return [...new Set(v)];
+        }
+        const INTERVAL_VALUES = buildIntervalValues();
+
         function initSliders() {
             document.querySelectorAll('.interval-control > div[id^="slider-"]').forEach(el => {
                 if (el.noUiSlider) return;
@@ -401,10 +417,9 @@
                 const name = el.dataset.name;
                 const valId = el.id.replace('slider-', 'interval-val-');
                 noUiSlider.create(el, {
-                    start: current,
-                    snap: true,
+                    start: [current],
                     connect: 'lower',
-                    range: { 'min': 0.5, '14%': 1, '28%': 5, '42%': 30, '57%': 60, '71%': 720, 'max': 1440 },
+                    range: INTERVAL_VALUES,
                     tooltips: { to: formatInterval, from: Number },
                     pips: { mode: 'values', values: [0.5, 1, 5, 30, 60, 720, 1440], density: 5, format: { to: formatInterval, from: Number } }
                 });
